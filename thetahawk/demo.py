@@ -36,9 +36,21 @@ def run_demo_scan() -> int:
         expiration=expiration_at.date(),
         strike=100.0,
         right=OptionRight.CALL,
-        metadata={"fictional": True},
+        metadata={"fictional": True, "open_interest_date": now.date().isoformat()},
     )
     put = replace(call, right=OptionRight.PUT)
+    underlying = Quote(
+        symbol=symbol,
+        instrument_type="equity",
+        observed_at=now,
+        source_timestamp=now,
+        bid=99.9,
+        ask=100.1,
+        last=100.0,
+        volume=1_000_000,
+        source=source,
+        metadata={"fictional": True},
+    )
     history = tuple(
         RealizedMove(
             symbol=symbol,
@@ -63,7 +75,10 @@ def run_demo_scan() -> int:
         EarningsScanInput(
             symbol=symbol,
             as_of=now,
-            underlying_price=100.0,
+            underlying_quote=underlying,
+            event_observed_at=event.observed_at,
+            event_source=event.source,
+            event_id=str(event.metadata["event_id"]),
             event_at=event_at,
             expiration_at=expiration_at,
             call=call,

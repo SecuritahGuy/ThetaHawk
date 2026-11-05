@@ -8,6 +8,12 @@ The initial product is research only. Every candidate is an idea for a person to
 
 ## Phase 1 — Market intelligence MVP
 
+### Implementation status
+
+- In place: local domain/storage, fictional demo path, deterministic earnings comparison, read-only Alpaca market-data adapter, timestamped CSV event/outcome inputs, one-shot scan/ingest commands, and read-only dashboard/API.
+- Remaining: test the live adapter with actual entitlements, source an event calendar/history dataset, add scheduled scanning with market-calendar and rate-limit handling, replay scans from stored snapshots, and implement the other four screening modules.
+- No data subscription or live order connection is configured.
+
 ### Deliverable
 
 A local Python application that ingests or loads market/event data, stores snapshots, runs deterministic screens on a configurable universe, and presents ranked research candidates with timestamps, source provenance, liquidity context, and risk notes. Include an earnings-focused screen first and interfaces for the other screens.

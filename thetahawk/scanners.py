@@ -8,7 +8,7 @@ the shared records in :mod:`thetahawk.domain` before invoking a screen.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from math import isfinite
 from statistics import median
 from typing import Protocol, Sequence
@@ -27,7 +27,10 @@ class EarningsScanInput:
 
     symbol: str
     as_of: datetime
-    underlying_price: float
+    underlying_quote: Quote
+    event_observed_at: datetime
+    event_source: str
+    event_id: str
     event_at: datetime
     expiration_at: datetime
     call: Quote
@@ -48,6 +51,7 @@ class ScreenPolicy:
     min_history: int = 4
     min_divergence_fraction: float = 0.10
     max_strike_deviation_fraction: float = 0.05
+    max_open_interest_age_days: int = 5
 
 
 class Scanner(Protocol):
@@ -94,16 +98,47 @@ class EarningsImpliedMoveScanner:
                 summary=reasons[0] if reasons else "Candidate suppressed before evaluation.",
                 rationale=tuple(reasons),
                 risks=risks,
-                source_timestamps=(item.call.observed_at, item.put.observed_at),
+                input_ids=tuple(
+                    [item.event_id]
+                    + [
+                        str(quote.metadata["contract_symbol"])
+                        for quote in (item.call, item.put)
+                        if quote.metadata.get("contract_symbol")
+                    ]
+                ),
+                source_timestamps=(
+                    item.event_observed_at,
+                    item.underlying_quote.source_timestamp or item.underlying_quote.observed_at,
+                    item.call.source_timestamp or item.call.observed_at,
+                    item.put.source_timestamp or item.put.observed_at,
+                ),
                 metrics=metrics.copy(),
             )
 
-        timestamps = (item.as_of, item.event_at, item.expiration_at,
-                      item.call.observed_at, item.put.observed_at)
+        underlying_price = item.underlying_quote.midpoint
+        timestamps = (
+            item.as_of,
+            item.event_observed_at,
+            item.event_at,
+            item.expiration_at,
+            item.underlying_quote.source_timestamp or item.underlying_quote.observed_at,
+            item.call.source_timestamp or item.call.observed_at,
+            item.put.source_timestamp or item.put.observed_at,
+        )
         if not all(_is_aware(value) for value in timestamps):
             reasons.append("Suppressed: all timestamps must be timezone-aware.")
             return result()
-        if not isfinite(item.underlying_price) or item.underlying_price <= 0:
+        if item.event_observed_at > item.as_of:
+            reasons.append("Suppressed: earnings event record was observed after the scan time.")
+            return result()
+        if (
+            item.underlying_quote.instrument_type.lower() != "equity"
+            or item.underlying_quote.symbol.upper() != item.symbol.upper()
+            or not _valid_quote(item.underlying_quote)
+        ):
+            reasons.append("Suppressed: underlying quote is missing, invalid, or for another symbol.")
+            return result()
+        if underlying_price is None or not isfinite(underlying_price) or underlying_price <= 0:
             reasons.append("Suppressed: underlying price must be positive and finite.")
             return result()
         if item.event_at <= item.as_of:
@@ -114,13 +149,18 @@ class EarningsImpliedMoveScanner:
             return result()
 
         quote_age = max(
-            (item.as_of - item.call.observed_at).total_seconds(),
-            (item.as_of - item.put.observed_at).total_seconds(),
+            (item.as_of - (item.underlying_quote.source_timestamp or item.underlying_quote.observed_at)).total_seconds(),
+            (item.as_of - (item.call.source_timestamp or item.call.observed_at)).total_seconds(),
+            (item.as_of - (item.put.source_timestamp or item.put.observed_at)).total_seconds(),
         )
         metrics["quote_age_seconds"] = round(quote_age, 1)
         if quote_age < 0 or quote_age > self.policy.max_quote_age_seconds:
-            reasons.append("Suppressed: one or both option quotes are future-dated or stale.")
+            reasons.append("Suppressed: one or more underlying/option quotes are future-dated or stale.")
             return result()
+        metrics["underlying_quote_source"] = item.underlying_quote.source
+        metrics["call_quote_source"] = item.call.source
+        metrics["put_quote_source"] = item.put.source
+        metrics["event_source"] = item.event_source
 
         mids: dict[str, float] = {}
         for label, quote, expected_right in (
@@ -142,7 +182,7 @@ class EarningsImpliedMoveScanner:
             if quote.strike is None or not isfinite(quote.strike) or quote.strike <= 0:
                 reasons.append(f"Suppressed: {label} strike is missing or invalid.")
                 return result()
-            strike_deviation = abs(quote.strike - item.underlying_price) / item.underlying_price
+            strike_deviation = abs(quote.strike - underlying_price) / underlying_price
             metrics[f"{label}_strike_deviation_fraction"] = round(strike_deviation, 6)
             if strike_deviation > self.policy.max_strike_deviation_fraction:
                 reasons.append(f"Suppressed: {label} strike is not sufficiently near the money.")
@@ -161,14 +201,27 @@ class EarningsImpliedMoveScanner:
             if quote.open_interest is None or quote.open_interest < self.policy.min_open_interest:
                 reasons.append(f"Suppressed: {label} open interest is missing or below policy.")
                 return result()
+            oi_date = quote.metadata.get("open_interest_date")
+            if isinstance(oi_date, datetime):
+                oi_date = oi_date.date()
+            elif not isinstance(oi_date, date):
+                try:
+                    oi_date = date.fromisoformat(str(oi_date)) if oi_date else None
+                except ValueError:
+                    oi_date = None
+            if oi_date is None or oi_date > item.as_of.date() or (
+                item.as_of.date() - oi_date
+            ).days > self.policy.max_open_interest_age_days:
+                reasons.append(f"Suppressed: {label} open interest date is missing or stale.")
+                return result()
             mids[label] = mid
 
         if item.call.strike != item.put.strike:
             reasons.append("Suppressed: call and put do not share the same straddle strike.")
             return result()
 
-        implied = (mids["call"] + mids["put"]) / item.underlying_price
-        metrics["underlying_price"] = item.underlying_price
+        implied = (mids["call"] + mids["put"]) / underlying_price
+        metrics["underlying_price"] = underlying_price
         metrics["straddle_mid"] = mids["call"] + mids["put"]
         metrics["implied_move_fraction"] = round(implied, 6)
         if implied <= 0 or implied > self.policy.max_straddle_fraction_of_underlying:
@@ -178,7 +231,8 @@ class EarningsImpliedMoveScanner:
         history = [
             abs(record.realized_move)
             for record in item.historical_realized_moves
-            if record.event_date < item.event_at.date()
+            if record.symbol.upper() == item.symbol.upper()
+            and record.event_date < item.event_at.date()
             and _is_aware(record.observed_at)
             and record.observed_at <= item.as_of
             and isfinite(record.realized_move)

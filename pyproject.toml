@@ -14,6 +14,7 @@ dependencies = [
   "numpy>=2.0",
   "polars>=1.15",
   "pydantic>=2.9",
+  "python-dotenv>=1.0",
   "requests>=2.32",
   "scipy>=1.14",
   "streamlit>=1.40",
@@ -27,6 +28,8 @@ dev = ["ruff>=0.7"]
 thetahawk-demo = "thetahawk.demo:run_demo_scan"
 thetahawk-api = "thetahawk.api:run"
 thetahawk-dashboard = "thetahawk.dashboard:main"
+thetahawk-ingest = "thetahawk.ingest:main"
+thetahawk-scan = "thetahawk.scan:main"
 
 [tool.setuptools.packages.find]
 include = ["thetahawk*"]

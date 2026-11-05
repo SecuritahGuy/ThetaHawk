@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from .domain import Candidate, EarningsEvent, Quote, record_payload
+from .domain import Candidate, EarningsEvent, Quote, RealizedMove, record_payload
 
 
 class ResearchStore:
@@ -38,7 +38,8 @@ class ResearchStore:
                 event_date DATE NOT NULL,
                 observed_at TIMESTAMPTZ NOT NULL,
                 source VARCHAR NOT NULL,
-                payload JSON NOT NULL
+                payload JSON NOT NULL,
+                PRIMARY KEY (symbol, event_date, observed_at, source)
             )
         """)
         self._connection.execute("""
@@ -50,6 +51,16 @@ class ResearchStore:
                 score DOUBLE,
                 status VARCHAR NOT NULL,
                 payload JSON NOT NULL
+            )
+        """)
+        self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS realized_moves (
+                symbol VARCHAR NOT NULL,
+                event_date DATE NOT NULL,
+                observed_at TIMESTAMPTZ NOT NULL,
+                source VARCHAR NOT NULL,
+                payload JSON NOT NULL,
+                PRIMARY KEY (symbol, event_date, observed_at, source)
             )
         """)
 
@@ -68,7 +79,21 @@ class ResearchStore:
             for e in events
         ]
         if rows:
-            self._connection.executemany("INSERT INTO earnings_events VALUES (?, ?, ?, ?, ?)", rows)
+            self._connection.executemany(
+                "INSERT OR REPLACE INTO earnings_events VALUES (?, ?, ?, ?, ?)", rows
+            )
+        return len(rows)
+
+    def save_realized_moves(self, moves: Iterable[RealizedMove]) -> int:
+        rows = [
+            (move.symbol, move.event_date, move.observed_at, move.source,
+             json.dumps(record_payload(move)))
+            for move in moves
+        ]
+        if rows:
+            self._connection.executemany(
+                "INSERT OR REPLACE INTO realized_moves VALUES (?, ?, ?, ?, ?)", rows
+            )
         return len(rows)
 
     def save_candidates(self, candidates: Iterable[Candidate]) -> int:
