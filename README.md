@@ -33,6 +33,8 @@ The demo writes one synthetic earnings case to the local DuckDB database. It is 
 
 For optional read-only Alpaca ingestion, copy `.env.example` to `.env`, configure keys and feeds from [docs/DATA_PROVIDERS.md](docs/DATA_PROVIDERS.md), then run `python -m thetahawk.ingest`. To run the earnings screen, fill the timestamped event and outcome CSVs using the schemas in `examples/`, then run `python -m thetahawk.scan --alpaca`. This command fetches current quotes only when `--alpaca` is supplied, records feed provenance, and stores suppressed outcomes when required data is missing. It places no orders.
 
+The overextended-equity screen uses an Alpaca current quote and Yahoo Finance adjusted daily closes. Install its optional dependency with `python -m pip install -e '.[yahoo]'`, then run `python -m thetahawk.equity_scan --symbols AAPL`. See [docs/DATA_PROVIDERS.md](docs/DATA_PROVIDERS.md) for source limitations and data-use notes.
+
 ## Research-only boundary
 
 All outputs are candidates for human review, not trade instructions. Numeric calculations and risk checks belong in deterministic code. There is no live order execution in the roadmap's first three implementation phases; paper trading is a later, explicitly reviewed phase.

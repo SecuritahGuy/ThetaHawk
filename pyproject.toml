@@ -23,6 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["ruff>=0.7"]
+yahoo = ["yfinance>=0.2.66"]
 
 [project.scripts]
 thetahawk-demo = "thetahawk.demo:run_demo_scan"
@@ -30,6 +31,7 @@ thetahawk-api = "thetahawk.api:run"
 thetahawk-dashboard = "thetahawk.dashboard:main"
 thetahawk-ingest = "thetahawk.ingest:main"
 thetahawk-scan = "thetahawk.scan:main"
+thetahawk-equity-scan = "thetahawk.equity_scan:main"
 
 [tool.setuptools.packages.find]
 include = ["thetahawk*"]

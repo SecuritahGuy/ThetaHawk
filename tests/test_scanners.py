@@ -120,9 +120,10 @@ class OverextendedEquityScannerTests(unittest.TestCase):
         self.history = tuple(
             HistoricalPrice(
                 symbol="DEMO",
-                timestamp=self.as_of - timedelta(days=65 - index + 1),
+                session_date=(self.as_of - timedelta(days=65 - index + 1)).date(),
                 close=100 + index * 0.03 + ((index * 7) % 11) * 0.07,
                 source="fixture",
+                observed_at=self.as_of,
                 adjusted=True,
             )
             for index in range(65)

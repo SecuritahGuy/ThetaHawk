@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from .domain import Candidate, EarningsEvent, Quote, RealizedMove, record_payload
+from .domain import Candidate, EarningsEvent, HistoricalPrice, Quote, RealizedMove, record_payload
 
 
 class ResearchStore:
@@ -63,6 +63,16 @@ class ResearchStore:
                 PRIMARY KEY (symbol, event_date, observed_at, source)
             )
         """)
+        self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS historical_prices (
+                symbol VARCHAR NOT NULL,
+                session_date DATE NOT NULL,
+                source VARCHAR NOT NULL,
+                observed_at TIMESTAMPTZ NOT NULL,
+                payload JSON NOT NULL,
+                PRIMARY KEY (symbol, session_date, source)
+            )
+        """)
 
     def save_quotes(self, quotes: Iterable[Quote]) -> int:
         rows = [
@@ -93,6 +103,18 @@ class ResearchStore:
         if rows:
             self._connection.executemany(
                 "INSERT OR REPLACE INTO realized_moves VALUES (?, ?, ?, ?, ?)", rows
+            )
+        return len(rows)
+
+    def save_historical_prices(self, prices: Iterable[HistoricalPrice]) -> int:
+        rows = [
+            (price.symbol, price.session_date, price.source, price.observed_at,
+             json.dumps(record_payload(price)))
+            for price in prices
+        ]
+        if rows:
+            self._connection.executemany(
+                "INSERT OR REPLACE INTO historical_prices VALUES (?, ?, ?, ?, ?)", rows
             )
         return len(rows)
 

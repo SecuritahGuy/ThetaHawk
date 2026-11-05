@@ -12,8 +12,11 @@ from datetime import date, datetime, timezone
 from math import isfinite
 from statistics import median
 from typing import Protocol, Sequence
+from zoneinfo import ZoneInfo
 
 from .domain import Candidate, CandidateStatus, HistoricalPrice, OptionRight, Quote, RealizedMove
+
+EASTERN = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,6 +340,7 @@ class OverextendedEquityScanner:
         status = CandidateStatus.SUPPRESSED
         score = 0.0
         quote_time = item.quote.source_timestamp or item.quote.observed_at
+        closes: list[HistoricalPrice] = []
 
         def result() -> Candidate:
             return Candidate(
@@ -350,12 +354,12 @@ class OverextendedEquityScanner:
                 rationale=tuple(reasons),
                 risks=risks,
                 input_ids=tuple(
-                    f"{row.symbol.upper()}:{row.timestamp.isoformat()}"
-                    for row in item.historical_prices
+                    f"{row.symbol.upper()}:{row.session_date.isoformat()}"
+                    for row in closes
                 ),
-                source_timestamps=(quote_time,) + tuple(
-                    row.timestamp for row in item.historical_prices
-                ),
+                source_timestamps=(quote_time,) + tuple(dict.fromkeys(
+                    row.observed_at for row in closes
+                )),
                 metrics=metrics.copy(),
             )
 
@@ -380,17 +384,18 @@ class OverextendedEquityScanner:
         rows = [
             row for row in item.historical_prices
             if row.symbol.upper() == item.symbol.upper()
-            and _is_aware(row.timestamp)
-            and row.timestamp < quote_time
-            and row.timestamp <= item.as_of
+            and _is_aware(row.observed_at)
+            and row.observed_at <= item.as_of
+            and row.session_date < quote_time.astimezone(EASTERN).date()
+            and row.session_date <= item.as_of.astimezone(EASTERN).date()
             and isfinite(row.close)
             and row.close > 0
         ]
-        rows.sort(key=lambda row: row.timestamp)
-        # Keep only one observation for each UTC session date.
+        rows.sort(key=lambda row: row.session_date)
+        # Keep only one observation for each exchange session date.
         daily: dict[date, HistoricalPrice] = {}
         for row in rows:
-            daily[row.timestamp.astimezone(timezone.utc).date()] = row
+            daily[row.session_date] = row
         closes = [daily[key] for key in sorted(daily)]
         window = max(2, item.window_sessions)
         required = max(window + 2, item.min_history_prices)

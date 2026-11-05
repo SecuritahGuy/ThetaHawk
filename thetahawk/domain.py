@@ -109,9 +109,10 @@ class HistoricalPrice:
     """A sourced historical daily close used by equity screens."""
 
     symbol: str
-    timestamp: datetime
+    session_date: date
     close: float
     source: str = "unknown"
+    observed_at: datetime = field(default_factory=utc_now)
     adjusted: bool = False
 
 

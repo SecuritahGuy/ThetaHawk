@@ -30,6 +30,12 @@ THETAHAWK_ALPACA_OPTIONS_FEED=indicative
 
 Current Massive individual plans list Options Starter at $29/month with 15-minute delayed data and two years of history; Developer at $79/month with four years; and Advanced at $199/month with real-time data and five-plus years. For eventual backtesting, Massive appears stronger than Alpaca's currently documented history, but don't buy a plan until the test design identifies the exact quote fields and dates required.
 
+## Temporary historical-price input: Yahoo Finance
+
+The overextended-equity screen can load adjusted daily closes through the optional `yfinance` package. Install with `python -m pip install -e '.[yahoo]'` and run `python -m thetahawk.equity_scan --symbols AAPL`. Current quotes still come from Alpaca; daily history comes from Yahoo. The screen stores normalized price rows and scan outputs in DuckDB.
+
+The adapter uses `Ticker.history(period=..., interval="1d", auto_adjust=True)` and treats results as session-date data; it records the fetch time rather than inventing an intraday quote timestamp. Yahoo Finance data availability and adjustments may change, so use this as a temporary research input and inspect provider and adjustment provenance before relying on results. The yfinance project says the Yahoo API is intended for personal use, is not affiliated with or endorsed by Yahoo, and users should review Yahoo's terms for their data use. This source does not provide an institutional market-data license or validation-quality event history.
+
 ## Next provider milestone
 
 The first scan uses operator-supplied CSVs for upcoming earnings and past realized moves. `earnings.csv` requires symbol, event date, before/after-market timing, chosen option expiration, timezone-aware `observed_at`, and source. `realized_moves.csv` requires symbol, event date, pre-event reference price, post-event price, timezone-aware `observed_at`, and source; Thetahawk derives the percentage move from the two prices. Use one consistent event window (for example, prior regular-session close to the first full regular-session close after the announcement), apply corporate-action adjustments, and record the source. Example headers are in `examples/`. Earnings dates are not inferred from option symbols or LLM prose. A calendar API adapter can replace the CSV input later without changing scanner calculations.
@@ -41,3 +47,5 @@ The first scan uses operator-supplied CSVs for upcoming earnings and past realiz
 - [Alpaca historical options data](https://docs.alpaca.markets/us/docs/historical-option-data) — history begins February 2024 and feed distinctions.
 - [Tradier market-data documentation](https://docs.tradier.com/brokerage-api/markets) — real-time data, sandbox, access scope, and expired-options history limitation.
 - [Massive options pricing](https://www.massive.com/pricing?product=options) — current tiers and plan feature matrix.
+- [yfinance daily-history API](https://ranaroussi.github.io/yfinance/reference/api/yfinance.Ticker.history.html) — supported history periods, intervals, and auto-adjust behavior.
+- [yfinance project README](https://github.com/ranaroussi/yfinance) — project affiliation and Yahoo Finance API usage notes.
