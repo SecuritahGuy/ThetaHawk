@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timedelta, timezone
 
+import requests
+
 from thetahawk.scheduled_collection import (
     RunStatus,
     ScheduledCollectionRunner,
@@ -112,6 +114,52 @@ class ScheduledCollectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "bad input"):
             runner.run_once()
         self.assertEqual(len(calls), 1)
+
+    def test_connection_failure_retries_then_completes(self) -> None:
+        calls = []
+        delays = []
+
+        def job():
+            calls.append(1)
+            if len(calls) == 1:
+                raise requests.ConnectionError("temporary disconnect")
+            return "ok"
+
+        runner = ScheduledCollectionRunner(
+            job,
+            session_is_open=lambda _now: True,
+            max_retries=2,
+            backoff_base_seconds=3,
+            sleep=delays.append,
+        )
+
+        result = runner.run_once()
+
+        self.assertEqual(result.status, RunStatus.COMPLETED)
+        self.assertEqual(result.attempts, 2)
+        self.assertEqual(result.value, "ok")
+        self.assertEqual(delays, [3])
+
+    def test_run_forever_reports_repeated_transient_failure_and_keeps_running(self) -> None:
+        reports = []
+        runner = ScheduledCollectionRunner(
+            lambda: (_ for _ in ()).throw(requests.Timeout("clock timed out")),
+            session_is_open=lambda _now: True,
+            max_retries=1,
+            backoff_base_seconds=0,
+            interval_seconds=0.01,
+            sleep=lambda _seconds: None,
+        )
+
+        iterations = runner.run_forever(max_iterations=2, on_result=reports.append)
+
+        self.assertEqual(iterations, 2)
+        self.assertEqual([row.status for row in reports], [
+            RunStatus.FAILED_RETRYABLE,
+            RunStatus.FAILED_RETRYABLE,
+        ])
+        self.assertTrue(all(row.attempts == 2 for row in reports))
+        self.assertTrue(all("clock timed out" in row.error for row in reports))
 
     def test_rechecks_calendar_after_backoff_and_skips_when_session_ends(self) -> None:
         now = [datetime(2026, 11, 2, 20, 59, tzinfo=timezone.utc)]

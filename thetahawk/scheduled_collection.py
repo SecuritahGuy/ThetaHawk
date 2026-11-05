@@ -17,6 +17,8 @@ from threading import Event
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+import requests
+
 
 NEW_YORK = ZoneInfo("America/New_York")
 
@@ -24,6 +26,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 class RunStatus(StrEnum):
     COMPLETED = "completed"
     SKIPPED_CLOSED = "skipped_closed"
+    FAILED_RETRYABLE = "failed_retryable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +34,7 @@ class RunResult:
     status: RunStatus
     attempts: int
     value: object | None = None
+    error: str | None = None
 
 
 class RateLimitError(RuntimeError):
@@ -55,6 +59,12 @@ def _is_rate_limited(error: BaseException) -> bool:
     return getattr(response, "status_code", None) == 429
 
 
+def _is_transient_request_error(error: BaseException) -> bool:
+    return _is_rate_limited(error) or isinstance(
+        error, (requests.ConnectionError, requests.Timeout)
+    )
+
+
 class ScheduledCollectionRunner:
     """Run one-shot work at fixed delays while the market session is open.
 
@@ -75,7 +85,7 @@ class ScheduledCollectionRunner:
         backoff_max_seconds: float = 60,
         now: Callable[[], datetime] | None = None,
         sleep: Callable[[float], None] = time.sleep,
-        is_rate_limited: Callable[[BaseException], bool] = _is_rate_limited,
+        is_rate_limited: Callable[[BaseException], bool] = _is_transient_request_error,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive")
@@ -142,7 +152,16 @@ class ScheduledCollectionRunner:
         while stop_event is None or not stop_event.is_set():
             if max_iterations is not None and iterations >= max_iterations:
                 break
-            result = self.run_once()
+            try:
+                result = self.run_once()
+            except Exception as exc:
+                if not self.is_rate_limited(exc):
+                    raise
+                result = RunResult(
+                    RunStatus.FAILED_RETRYABLE,
+                    attempts=self.max_retries + 1,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
             iterations += 1
             if on_result:
                 on_result(result)
@@ -228,7 +247,34 @@ def main() -> int:
     )
 
     def report(result: RunResult) -> None:
-        print(f"Scheduled scan {result.status.value} after {result.attempts} attempt(s).")
+        timestamp = datetime.now(timezone.utc).isoformat()
+        details = []
+        value = result.value
+        if value is not None:
+            for attribute, label in (
+                ("saved_quotes", "saved_quotes"),
+                ("fetched_quotes", "fetched_quotes"),
+                ("symbols_with_expiration", "symbols_with_expiration"),
+                ("eligible_events", "eligible_events"),
+                ("requested_chains", "requested_chains"),
+            ):
+                if hasattr(value, attribute):
+                    details.append(f"{label}={getattr(value, attribute)}")
+            for attribute, label in (
+                ("failed_chains", "failed_chains"),
+                ("skipped_events", "skipped_events"),
+                ("symbols_without_eligible_expiration", "symbols_without_expiration"),
+            ):
+                if hasattr(value, attribute):
+                    details.append(f"{label}={len(getattr(value, attribute))}")
+        if result.error:
+            details.append(f"error={result.error}")
+        suffix = f"; {'; '.join(details)}" if details else ""
+        print(
+            f"{timestamp} scheduled scan {result.status.value} "
+            f"after {result.attempts} attempt(s){suffix}.",
+            flush=True,
+        )
 
     try:
         runner.run_forever(on_result=report)
