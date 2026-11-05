@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thetahawk"
+version = "0.1.0"
+description = "Self-hosted options intelligence and research platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "duckdb>=1.1",
+  "fastapi>=0.115",
+  "numpy>=2.0",
+  "polars>=1.15",
+  "pydantic>=2.9",
+  "requests>=2.32",
+  "scipy>=1.14",
+  "streamlit>=1.40",
+  "uvicorn[standard]>=0.32",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.7"]
+
+[project.scripts]
+thetahawk-demo = "thetahawk.demo:run_demo_scan"
+thetahawk-api = "thetahawk.api:run"
+thetahawk-dashboard = "thetahawk.dashboard:main"
+
+[tool.setuptools.packages.find]
+include = ["thetahawk*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
