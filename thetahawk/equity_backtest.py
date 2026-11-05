@@ -80,6 +80,7 @@ def walk_forward_overextended(
             per_symbol.append({
                 "symbol": symbol,
                 "source": sources,
+                "price_sessions": len(daily),
                 "eligible_days": 0,
                 "threshold_days": 0,
                 "episodes": 0,
@@ -147,10 +148,29 @@ def walk_forward_overextended(
             "history_retrieved_at": max(row.observed_at for row in daily).isoformat(),
             "first_session": daily[0].session_date.isoformat(),
             "last_session": daily[-1].session_date.isoformat(),
+            "price_sessions": len(daily),
             "eligible_days": len(eligible),
             "threshold_days": len(threshold_days),
             "episodes": len(symbol_episodes),
         })
+
+    review_flags = [
+        {
+            "symbol": row["symbol"],
+            "flag": "insufficient_history_for_forward_test",
+            "price_sessions": row["price_sessions"],
+            "note": "No eligible walk-forward observations after history and forward-window requirements.",
+        }
+        for row in per_symbol
+        if row.get("eligible_days") == 0 and not row.get("excluded_reason")
+    ]
+    review_flags.extend({
+        "symbol": row["symbol"],
+        "signal_date": row["signal_date"],
+        "flag": "extreme_20_session_move",
+        "move_fraction": row["current_window_move_fraction"],
+        "note": "Confirm the price series, corporate actions, halts, and event context independently.",
+    } for row in episodes if abs(row["current_window_move_fraction"]) >= 1.0)
 
     return {
         "report_type": "exploratory_overextended_equity_walk_forward",
@@ -169,6 +189,7 @@ def walk_forward_overextended(
         "threshold_crossing_days": sum(row["threshold_days"] for row in per_symbol),
         "episode_count": len(episodes),
         "episodes": episodes,
+        "review_flags": review_flags,
         "summary": {
             str(horizon): {
                 "episode_returns": _return_summary(episodes, horizon),

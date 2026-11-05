@@ -39,6 +39,7 @@ def test_walk_forward_groups_repeated_threshold_days_into_one_episode() -> None:
     episode = report["episodes"][0]
     assert episode["signal_date"] == (date(2025, 1, 1) + timedelta(days=80)).isoformat()
     assert report["summary"]["5"]["episode_returns"]["sample_size"] == 1
+    assert not any(flag["flag"] == "extreme_20_session_move" for flag in report["review_flags"])
 
 
 def test_walk_forward_excludes_session_on_exclusive_as_of_date() -> None:

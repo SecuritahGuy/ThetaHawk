@@ -53,6 +53,8 @@ Review available earnings outcome coverage with `python -m thetahawk.earnings_va
 
 For a limited price-only check of the overextended-equity screen, run `python -m thetahawk.equity_backtest`. It applies the current thresholds walk-forward to stored adjusted daily closes, groups repeated crossings into episodes, and measures 5- and 20-session close-based returns from the next session's close. This does not test option screens, fills, or profitability; read the report's sample sizes and limitations before interpreting it.
 
+To automate a broader sample, run `python -m thetahawk.equity_sample --count 20 --seed 20261105 --period 5y --check-options`. It draws a reproducible sample from current Nasdaq Trader listed common-equity symbols, excluding the configured core universe, downloads adjusted Yahoo daily history, saves it into DuckDB, and writes a JSON report under `data/`. The optional Alpaca check records which symbols have listed expirations without fetching quotes. The report retains the seed, exact sampled symbols, fetch failures, and backtest limits. This covers currently listed equities only and is not an options strategy test.
+
 ## Research-only boundary
 
 All outputs are candidates for human review, not trade instructions. Numeric calculations and risk checks belong in deterministic code. There is no live order execution in the roadmap's first three implementation phases; paper trading is a later, explicitly reviewed phase.
