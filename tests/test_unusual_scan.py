@@ -9,6 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from thetahawk.domain import OptionRight, Quote
+from thetahawk.replay import audit_candidate
 from thetahawk.settings import Settings
 from thetahawk.storage import ResearchStore
 from thetahawk.unusual_scan import run_unusual_activity_scan
@@ -46,10 +47,19 @@ class UnusualActivityPipelineTests(unittest.TestCase):
                 ), 0)
             with ResearchStore(settings.database_path) as store:
                 [candidate] = store.recent_candidates(1)
+                [manifest] = store.scan_runs_for_candidate(candidate["candidate_id"])
+            audit = audit_candidate(settings.database_path, candidate["candidate_id"])
 
         self.assertEqual(candidate["scanner"], "unusual_options_activity")
         self.assertEqual(candidate["status"], "research")
         self.assertEqual(candidate["metrics"]["baseline_session_count"], 20)
+        self.assertEqual(manifest["scanner_version"], "1")
+        self.assertEqual(manifest["policy_version"], "unusual-options-activity-policy-v1")
+        inputs = manifest["inputs"]["candidate_inputs"][candidate["candidate_id"]]
+        self.assertEqual(inputs["current"]["volume"], 1_000)
+        self.assertEqual(len(inputs["history"]), 20)
+        self.assertTrue(audit["exact_replay_possible"])
+        self.assertTrue(audit["recomputation"]["matches_stored_candidate"])
 
     @staticmethod
     def quote(observed_at: datetime, volume: int) -> Quote:

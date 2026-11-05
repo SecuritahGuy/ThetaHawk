@@ -6,8 +6,9 @@ import argparse
 from datetime import datetime, timezone
 from typing import Sequence
 
-from .domain import Candidate, Quote
+from .domain import Candidate, Quote, record_payload
 from .providers import AlpacaMarketDataProvider
+from .run_manifest import create_scan_run_manifest
 from .scanners import OverextendedEquityInput, OverextendedEquityScanner
 from .settings import Settings
 from .storage import ResearchStore
@@ -50,24 +51,44 @@ def run_equity_scan(
     as_of = datetime.now(timezone.utc)
     scanner = OverextendedEquityScanner()
     candidates: list[Candidate] = []
+    screen_inputs: list[OverextendedEquityInput] = []
     for symbol in selected:
         quote = quote_by_symbol.get(symbol) or Quote(
             symbol=symbol,
             observed_at=as_of,
             source="alpaca:stocks:unavailable",
         )
-        candidates.append(scanner.scan(OverextendedEquityInput(
+        item = OverextendedEquityInput(
             symbol=symbol,
             as_of=as_of,
             quote=quote,
             historical_prices=historical_by_symbol[symbol],
-        )))
+        )
+        screen_inputs.append(item)
+        candidates.append(scanner.scan(item))
+
+    manifest = create_scan_run_manifest(
+        scanner=scanner.name,
+        scanner_version="1",
+        policy_version="overextended-equity-policy-v1",
+        as_of=as_of,
+        candidate_ids=tuple(candidate.candidate_id for candidate in candidates),
+        inputs={
+            "symbols": selected,
+            "history_period": history_period,
+            "market_data_provider": getattr(market_provider, "name", type(market_provider).__name__),
+            "history_provider": getattr(history_provider, "name", type(history_provider).__name__),
+            "provider_errors": errors,
+            "screen_inputs": [record_payload(item) for item in screen_inputs],
+        },
+    )
 
     all_prices = [price for rows in historical_by_symbol.values() for price in rows]
     with ResearchStore(settings.database_path) as store:
         saved_prices = store.save_historical_prices(all_prices)
         store.save_quotes(quotes)
         store.save_candidates(candidates)
+        store.save_scan_run(manifest)
 
     research_count = sum(candidate.status.value == "research" for candidate in candidates)
     print(

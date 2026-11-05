@@ -7,8 +7,9 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
-from .domain import Candidate, Quote
+from .domain import Candidate, Quote, record_payload
 from .providers import AlpacaMarketDataProvider
+from .run_manifest import create_scan_run_manifest
 from .scanners import (
     VolatilityDivergenceInput,
     VolatilityDivergenceScanner,
@@ -75,27 +76,46 @@ def run_volatility_scan(
     as_of = datetime.now(timezone.utc)
     scanner = VolatilityDivergenceScanner()
     candidates: list[Candidate] = []
+    screen_inputs: list[VolatilityDivergenceInput] = []
     for symbol in selected:
         equity = equity_by_symbol.get(symbol) or Quote(
             symbol=symbol,
             observed_at=as_of,
             source="alpaca:stocks:unavailable",
         )
-        candidates.append(scanner.scan(VolatilityDivergenceInput(
+        item = VolatilityDivergenceInput(
             symbol=symbol,
             as_of=as_of,
             underlying_quote=equity,
             option_quotes=options_by_symbol[symbol],
             historical_prices=histories[symbol],
-        )))
+        )
+        screen_inputs.append(item)
+        candidates.append(scanner.scan(item))
 
     option_quotes = [quote for rows in options_by_symbol.values() for quote in rows]
     historical_prices = [row for rows in histories.values() for row in rows]
     quotes = [*equity_quotes, *option_quotes]
+    manifest = create_scan_run_manifest(
+        scanner=scanner.name,
+        scanner_version="1",
+        policy_version="volatility-divergence-policy-v1",
+        as_of=as_of,
+        candidate_ids=tuple(candidate.candidate_id for candidate in candidates),
+        inputs={
+            "symbols": selected,
+            "history_period": history_period,
+            "market_data_provider": getattr(market_provider, "name", type(market_provider).__name__),
+            "history_provider": getattr(history_provider, "name", type(history_provider).__name__),
+            "provider_errors": errors,
+            "screen_inputs": [record_payload(item) for item in screen_inputs],
+        },
+    )
     with ResearchStore(settings.database_path) as store:
         store.save_quotes(quotes)
         store.save_historical_prices(historical_prices)
         store.save_candidates(candidates)
+        store.save_scan_run(manifest)
 
     research_count = sum(candidate.status.value == "research" for candidate in candidates)
     print(

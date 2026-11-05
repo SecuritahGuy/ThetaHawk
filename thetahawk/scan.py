@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from .csv_inputs import CsvResearchInputs
 from .domain import Candidate, CandidateStatus, EarningsEvent, Quote, record_payload
 from .providers import AlpacaMarketDataProvider, DemoProvider, MarketDataProvider
-from .scanners import EarningsImpliedMoveScanner, EarningsScanInput
+from .scanners import EarningsImpliedMoveScanner, EarningsScanInput, ScreenPolicy
 from .run_manifest import create_scan_run_manifest
 from .settings import Settings
 from .storage import ResearchStore
@@ -64,42 +64,27 @@ def _best_atm_pair(
     return call, put
 
 
-def run_scan(*, use_alpaca: bool, symbols: tuple[str, ...] | None = None) -> int:
-    settings = Settings.from_env()
-    selected_symbols = tuple(symbol.upper() for symbol in (symbols or settings.symbols))
-    provider: MarketDataProvider = (
-        AlpacaMarketDataProvider(settings) if use_alpaca else DemoProvider()
-    )
-    inputs = CsvResearchInputs(settings)
-    initial_time = datetime.now(timezone.utc)
-    events = inputs.get_earnings_events(
-        selected_symbols,
-        start=initial_time.astimezone(EASTERN).date(),
-        end=(initial_time + timedelta(days=45)).astimezone(EASTERN).date(),
-    )
-    realized_moves = inputs.get_realized_moves(selected_symbols)
-    quotes: list[Quote] = []
-    equity_by_symbol: dict[str, Quote] = {}
+def evaluate_earnings_inputs(
+    events: list[EarningsEvent],
+    realized_moves,
+    quotes: list[Quote],
+    as_of: datetime,
+    *,
+    use_alpaca: bool,
+    policy: ScreenPolicy | None = None,
+) -> list[Candidate]:
+    """Pure earnings evaluation shared by collection and deterministic replay."""
+    equity_by_symbol = {
+        quote.symbol.upper(): quote for quote in quotes
+        if quote.instrument_type.lower() == "equity"
+    }
     option_by_key: dict[tuple[str, date], list[Quote]] = {}
-    if events:
-        equity_quotes = provider.get_equity_quotes(selected_symbols)
-        quotes.extend(equity_quotes)
-        equity_by_symbol = {quote.symbol.upper(): quote for quote in equity_quotes}
-        if use_alpaca:
-            for event in events:
-                expiration_raw = event.metadata.get("expiration_date")
-                if not expiration_raw:
-                    continue
-                expiration = date.fromisoformat(str(expiration_raw))
-                key = (event.symbol.upper(), expiration)
-                if key not in option_by_key:
-                    chain = provider.get_option_quotes(event.symbol, expiration)
-                    option_by_key[key] = chain
-                    quotes.extend(chain)
+    for quote in quotes:
+        if quote.instrument_type.lower() == "option" and quote.expiration is not None:
+            option_by_key.setdefault((quote.symbol.upper(), quote.expiration), []).append(quote)
 
-    as_of = datetime.now(timezone.utc)
     candidates: list[Candidate] = []
-    scanner = EarningsImpliedMoveScanner()
+    scanner = EarningsImpliedMoveScanner(policy)
     for event in events:
         event_at = _event_datetime(event)
         if event_at is None:
@@ -145,6 +130,50 @@ def run_scan(*, use_alpaca: bool, symbols: tuple[str, ...] | None = None) -> int
                 move for move in realized_moves if move.symbol.upper() == event.symbol.upper()
             ),
         )))
+    return candidates
+
+
+def run_scan(*, use_alpaca: bool, symbols: tuple[str, ...] | None = None) -> int:
+    settings = Settings.from_env()
+    selected_symbols = tuple(symbol.upper() for symbol in (symbols or settings.symbols))
+    provider: MarketDataProvider = (
+        AlpacaMarketDataProvider(settings) if use_alpaca else DemoProvider()
+    )
+    inputs = CsvResearchInputs(settings)
+    initial_time = datetime.now(timezone.utc)
+    events = inputs.get_earnings_events(
+        selected_symbols,
+        start=initial_time.astimezone(EASTERN).date(),
+        end=(initial_time + timedelta(days=45)).astimezone(EASTERN).date(),
+    )
+    realized_moves = inputs.get_realized_moves(selected_symbols)
+    quotes: list[Quote] = []
+    fetched_chains: set[tuple[str, date]] = set()
+    if events:
+        equity_quotes = provider.get_equity_quotes(selected_symbols)
+        quotes.extend(equity_quotes)
+        if use_alpaca:
+            for event in events:
+                expiration_raw = event.metadata.get("expiration_date")
+                if not expiration_raw:
+                    continue
+                expiration = date.fromisoformat(str(expiration_raw))
+                key = (event.symbol.upper(), expiration)
+                if key not in fetched_chains:
+                    fetched_chains.add(key)
+                    chain = provider.get_option_quotes(event.symbol, expiration)
+                    quotes.extend(chain)
+
+    as_of = datetime.now(timezone.utc)
+    scanner = EarningsImpliedMoveScanner()
+    candidates = evaluate_earnings_inputs(
+        events,
+        realized_moves,
+        quotes,
+        as_of,
+        use_alpaca=use_alpaca,
+        policy=scanner.policy,
+    )
 
     manifest = create_scan_run_manifest(
         scanner=scanner.name,
@@ -154,6 +183,8 @@ def run_scan(*, use_alpaca: bool, symbols: tuple[str, ...] | None = None) -> int
         candidate_ids=tuple(candidate.candidate_id for candidate in candidates),
         inputs={
             "symbols": selected_symbols,
+            "provider": provider.name,
+            "use_alpaca": use_alpaca,
             "policy": record_payload(scanner.policy),
             "earnings_events": events,
             "realized_moves": realized_moves,

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from thetahawk.domain import HistoricalPrice, Quote
 from thetahawk.equity_scan import run_equity_scan
+from thetahawk.replay import audit_candidate
 from thetahawk.settings import Settings
 from thetahawk.storage import ResearchStore
 
@@ -64,13 +65,23 @@ class EquityScanPipelineTests(unittest.TestCase):
                 ), 0)
             with ResearchStore(settings.database_path) as store:
                 candidates = store.recent_candidates(1)
+                [manifest] = store.scan_runs_for_candidate(candidates[0]["candidate_id"])
                 history_count = store._connection.execute(
                     "SELECT COUNT(*) FROM historical_prices"
                 ).fetchone()[0]
+            audit = audit_candidate(settings.database_path, candidates[0]["candidate_id"])
 
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["scanner"], "overextended_equity")
         self.assertEqual(history_count, 65)
+        self.assertEqual(manifest["scanner"], "overextended_equity")
+        self.assertEqual(manifest["policy_version"], "overextended-equity-policy-v1")
+        [screen_input] = manifest["inputs"]["screen_inputs"]
+        self.assertEqual(screen_input["quote"]["source"], "fixture:quote")
+        self.assertEqual(len(screen_input["historical_prices"]), 65)
+        self.assertEqual(screen_input["window_sessions"], 20)
+        self.assertTrue(audit["exact_replay_possible"])
+        self.assertTrue(audit["recomputation"]["matches_stored_candidate"])
 
 
 if __name__ == "__main__":

@@ -2,7 +2,9 @@ from datetime import date, datetime, timedelta, timezone
 
 from thetahawk.discover import run_discovery
 from thetahawk.domain import OptionRight, Quote, record_payload
+from thetahawk.replay import audit_candidate
 from thetahawk.settings import Settings
+from thetahawk.storage import ResearchStore
 
 
 class FakeMarketProvider:
@@ -56,10 +58,13 @@ class FakeHistoryProvider:
 
 class MemoryStore:
     records = []
+    manifests = []
 
     def __init__(self, _path):
         self.records = []
+        self.manifests = []
         MemoryStore.records = self.records
+        MemoryStore.manifests = self.manifests
 
     def __enter__(self):
         return self
@@ -79,6 +84,9 @@ class MemoryStore:
     def save_candidates(self, candidates):
         self.records.extend(record_payload(candidate) for candidate in candidates)
         return len(candidates)
+
+    def save_scan_run(self, manifest):
+        self.manifests.append(record_payload(manifest))
 
     def recent_candidates(self, limit=100):
         return self.records[:limit]
@@ -106,6 +114,11 @@ def test_integrated_discovery_persists_ranked_pair_and_screen_evidence(tmp_path,
     assert discovery_rows
     assert discovery_rows[0]["metrics"]["research_screen_count"] == 0
     assert any(row["scanner"] == "volatility_divergence" for row in rows)
+    [manifest] = MemoryStore.manifests
+    assert manifest["scanner"] == "options_discovery"
+    assert manifest["policy_version"] == "integrated-discovery-policy-v1"
+    assert discovery_rows[0]["candidate_id"] in manifest["candidate_ids"]
+    assert len(manifest["inputs"]["option_quotes_by_symbol"]["AAPL"]) == 2
 
 
 def test_equity_quote_provider_failure_keeps_auditable_discovery_run(tmp_path, monkeypatch):
@@ -129,3 +142,22 @@ def test_equity_quote_provider_failure_keeps_auditable_discovery_run(tmp_path, m
         if candidate.scanner == "overextended_equity"
     )
     assert equity_candidate.status.value == "suppressed"
+
+
+def test_integrated_discovery_recomputes_from_its_manifest(tmp_path):
+    settings = Settings(database_path=tmp_path / "research.duckdb")
+    result = run_discovery(
+        symbols=["AAPL"],
+        settings=settings,
+        market_provider=FakeMarketProvider(),
+        history_provider=FakeHistoryProvider(),
+    )
+    with ResearchStore(settings.database_path) as store:
+        rows = store.recent_candidates(100)
+        aggregate = next(row for row in rows if row["scanner"] == "options_discovery")
+
+    audit = audit_candidate(settings.database_path, aggregate["candidate_id"])
+
+    assert result.discoveries
+    assert audit["exact_replay_possible"] is True
+    assert audit["recomputation"]["matches_stored_candidate"] is True

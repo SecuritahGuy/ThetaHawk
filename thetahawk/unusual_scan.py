@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
 from .domain import Candidate
+from .run_manifest import create_scan_run_manifest
 from .settings import Settings
 from .storage import ResearchStore
 from .unusual_activity import (
@@ -38,6 +39,7 @@ def run_unusual_activity_scan(
     scanner = UnusualOptionsActivityScanner()
     candidates: list[Candidate] = []
     snapshots_seen = 0
+    candidate_inputs: dict[str, dict[str, object]] = {}
 
     with ResearchStore(settings.database_path) as store:
         for symbol in selected:
@@ -71,7 +73,32 @@ def run_unusual_activity_scan(
                     current=current,
                     history=history,
                 )))
+                candidate_inputs[candidates[-1].candidate_id] = {
+                    "symbol": symbol,
+                    "current": current,
+                    "history": history,
+                }
+        manifest = create_scan_run_manifest(
+            scanner=scanner.name,
+            scanner_version="1",
+            policy_version="unusual-options-activity-policy-v1",
+            as_of=scan_time,
+            candidate_ids=tuple(candidate.candidate_id for candidate in candidates),
+            inputs={
+                "symbols": selected,
+                "history_days": history_days,
+                "policy": {
+                    "minimum_history_sessions": 20,
+                    "time_bucket_minutes": 15,
+                    "minimum_current_volume": 50,
+                    "minimum_robust_z_score": 3.5,
+                    "maximum_quote_age_seconds": 900,
+                },
+                "candidate_inputs": candidate_inputs,
+            },
+        )
         store.save_candidates(candidates)
+        store.save_scan_run(manifest)
 
     flagged = sum(candidate.status.value == "research" for candidate in candidates)
     print(

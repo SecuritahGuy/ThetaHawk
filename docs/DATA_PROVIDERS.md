@@ -8,6 +8,10 @@ The adapter requests latest equity quotes and option-chain snapshots. It also re
 
 The default settings are `iex` for equities and `indicative` for options. Alpaca describes its free indicative options feed as modified quotes and derivative trades delayed by 15 minutes; OPRA is the consolidated BBO feed and requires an active subscription. Historical option data currently begins in February 2024. These limits make Alpaca useful for wiring and current research, but the free feed and short history are insufficient by themselves for a strong historical-validation phase. The app records the selected feed in each quote and the earnings screen suppresses inputs with missing or stale open-interest dates.
 
+Alpaca's official API provides historical option bars and trades, but the official Python client does not expose historical bid/ask option quotes. Bars are OHLC observations and cannot reconstruct executable bid/ask fills. The bars endpoint supports historical requests and pagination; the documented Basic plan is limited to the latest 15 minutes, while the Algo Trader Plus plan has broader historical access. The SDK documents historical option-trade retrieval only up to seven days back. See the [historical options overview](https://docs.alpaca.markets/us/docs/historical-option-data), [option-bars endpoint](https://docs.alpaca.markets/us/reference/optionbars), [option-trades endpoint](https://docs.alpaca.markets/us/reference/optiontrades), [market-data plans](https://docs.alpaca.markets/us/docs/about-market-data-api), and [Python historical options client](https://github.com/alpacahq/alpaca-py/blob/master/alpaca/data/historical/option.py).
+
+Treat bar-based studies as close-based proxies, not executable strategy backtests. For quote-level earnings studies, collect option snapshots prospectively before events and link them to explicit post-event price measurement dates, or evaluate a provider that offers licensed historical NBBO quotes.
+
 Configure the keys and feeds in a local `.env` file (never commit it):
 
 ```text

@@ -20,6 +20,7 @@ from .scanners import (
 )
 from .settings import Settings
 from .storage import ResearchStore
+from .run_manifest import create_scan_run_manifest
 from .unusual_activity import UnusualOptionsActivityInput, UnusualOptionsActivityScanner
 from .yahoo import YahooHistoricalPriceProvider
 
@@ -111,6 +112,7 @@ def run_discovery(
     volatility_scanner = VolatilityDivergenceScanner()
     unusual_scanner = UnusualOptionsActivityScanner()
     with ResearchStore(settings.database_path) as store:
+        unusual_inputs_by_candidate: dict[str, dict[str, object]] = {}
         for symbol in selected:
             underlying = equity_by_symbol.get(symbol) or Quote(
                 symbol=symbol, observed_at=as_of, source="alpaca:stocks:unavailable"
@@ -153,12 +155,19 @@ def run_discovery(
                 if quote.metadata.get("contract_symbol")
             }
             for contract, current in pair_quotes.items():
-                candidates.append(unusual_scanner.scan(UnusualOptionsActivityInput(
+                history = previous_by_contract.get(contract, [])
+                candidate = unusual_scanner.scan(UnusualOptionsActivityInput(
                     symbol=symbol,
                     as_of=as_of,
                     current=current,
-                    history=previous_by_contract.get(contract, []),
-                )))
+                    history=history,
+                ))
+                candidates.append(candidate)
+                unusual_inputs_by_candidate[candidate.candidate_id] = {
+                    "symbol": symbol,
+                    "current": current,
+                    "history": history,
+                }
 
         all_option_quotes = [quote for rows in chains.values() for quote in rows]
         all_history = [row for rows in histories.values() for row in rows]
@@ -168,7 +177,63 @@ def run_discovery(
         # Persist a compact, inspectable ranked view. Raw per-screen evidence
         # remains alongside each discovery in the same candidates table.
         ranked = rank_discoveries(candidates)
-        store.save_candidates(_discovery_records(ranked, as_of))
+        discovery_candidates = _discovery_records(ranked, as_of)
+        store.save_candidates(discovery_candidates)
+        manifest = create_scan_run_manifest(
+            scanner="options_discovery",
+            scanner_version="1",
+            policy_version="integrated-discovery-policy-v1",
+            as_of=as_of,
+            candidate_ids=tuple(
+                candidate.candidate_id for candidate in (*candidates, *discovery_candidates)
+            ),
+            inputs={
+                "symbols": selected,
+                "history_period": history_period,
+                "evaluation_date": today,
+                "stale_quote_seconds": settings.stale_quote_seconds,
+                "selection_policy": {
+                    "min_dte": 14,
+                    "max_dte": 45,
+                    "target_dte": 30,
+                    "max_strike_deviation_fraction": 0.05,
+                    "max_leg_spread_fraction": 0.20,
+                    "min_option_volume": 1,
+                    "min_open_interest": 1,
+                    "max_pairs": 10,
+                },
+                "screen_policies": {
+                    "overextended_equity": {
+                        "window_sessions": 20,
+                        "min_history_prices": 60,
+                        "minimum_move_fraction": 0.05,
+                        "minimum_robust_z_score": 3.5,
+                    },
+                    "volatility_divergence": {
+                        "realized_window_sessions": 20,
+                        "minimum_history_prices": 21,
+                        "minimum_divergence_fraction": 0.25,
+                        "minimum_option_volume": 1,
+                        "minimum_open_interest": 1,
+                        "maximum_quote_age_seconds": settings.stale_quote_seconds,
+                        "maximum_spread_fraction": 0.20,
+                        "maximum_open_interest_age_days": 5,
+                    },
+                    "unusual_options_activity": {
+                        "minimum_history_sessions": 20,
+                        "time_bucket_minutes": 15,
+                        "minimum_current_volume": 50,
+                        "minimum_robust_z_score": 3.5,
+                        "maximum_quote_age_seconds": settings.stale_quote_seconds,
+                    },
+                },
+                "equity_quotes": equity_quotes,
+                "option_quotes_by_symbol": chains,
+                "historical_prices_by_symbol": histories,
+                "unusual_activity_inputs_by_candidate": unusual_inputs_by_candidate,
+            },
+        )
+        store.save_scan_run(manifest)
 
     return DiscoveryRun(
         as_of=as_of,

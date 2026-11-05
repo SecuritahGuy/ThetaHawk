@@ -12,9 +12,12 @@ from thetahawk.domain import (
     OptionRight,
     Quote,
     RealizedMove,
+    record_payload,
 )
 from thetahawk.replay import audit_candidate
-from thetahawk.run_manifest import create_scan_run_manifest
+from thetahawk.run_manifest import create_scan_run_manifest, current_code_version
+from thetahawk.scan import evaluate_earnings_inputs
+from thetahawk.scanners import ScreenPolicy
 from thetahawk.storage import ResearchStore
 
 
@@ -177,7 +180,50 @@ class ReplayAuditTests(unittest.TestCase):
             audit["scan_run_manifest"]["inputs"]["realized_moves"][0]["realized_move"],
             0.05,
         )
-        self.assertIn("no registered deterministic replay adapter", " ".join(audit["limitations"]))
+        self.assertIn("could not be replayed", " ".join(audit["limitations"]))
+
+    def test_recomputes_supported_earnings_scan_from_manifest_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "research.duckdb"
+            event = EarningsEvent(
+                symbol="AAPL",
+                event_date=self.event_date,
+                timing=None,
+                observed_at=self.as_of - timedelta(minutes=5),
+                source="fixture",
+                metadata={"event_id": self.event_id},
+            )
+            policy = ScreenPolicy()
+            candidate, = evaluate_earnings_inputs(
+                [event], [], [], self.as_of, use_alpaca=False, policy=policy
+            )
+            manifest = create_scan_run_manifest(
+                scanner="earnings_implied_move",
+                scanner_version="1",
+                policy_version="earnings-screen-policy-v1",
+                as_of=self.as_of,
+                candidate_ids=(candidate.candidate_id,),
+                inputs={
+                    "symbols": ("AAPL",),
+                    "provider": "demo-fictional",
+                    "use_alpaca": False,
+                    "policy": record_payload(policy),
+                    "earnings_events": [event],
+                    "realized_moves": [],
+                    "quotes": [],
+                },
+                code_version=current_code_version(),
+                run_id="run-replayable",
+            )
+            with ResearchStore(database) as store:
+                store.save_candidates([candidate])
+                store.save_scan_run(manifest)
+
+            audit = audit_candidate(database, candidate.candidate_id)
+
+        self.assertTrue(audit["exact_replay_possible"])
+        self.assertTrue(audit["recomputation"]["matches_stored_candidate"])
+        self.assertEqual(audit["recomputation"]["recomputed_candidate"], record_payload(candidate))
 
     def test_audits_historical_closes_for_overextended_screen(self) -> None:
         candidate_id = "AAPL:overextended_equity:2026-11-05"
