@@ -1,1 +1,1 @@
-symbol,event_date,reference_price,post_event_price,observed_at,source
+symbol,event_date,post_event_date,reference_price,post_event_price,observed_at,source

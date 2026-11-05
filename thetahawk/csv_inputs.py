@@ -66,6 +66,10 @@ class CsvResearchInputs:
             try:
                 symbol = _required(row, "symbol").upper()
                 event_date = date.fromisoformat(_required(row, "event_date"))
+                post_event_date_raw = (row.get("post_event_date") or "").strip()
+                post_event_date = (
+                    date.fromisoformat(post_event_date_raw) if post_event_date_raw else None
+                )
                 reference_price = float(_required(row, "reference_price"))
                 post_event_price = float(_required(row, "post_event_price"))
                 observed_at = _parse_aware_datetime(_required(row, "observed_at"))
@@ -82,6 +86,7 @@ class CsvResearchInputs:
                 reference_price=reference_price,
                 post_event_price=post_event_price,
                 realized_move=(post_event_price - reference_price) / reference_price,
+                post_event_date=post_event_date,
                 source=source,
                 observed_at=observed_at,
             ))

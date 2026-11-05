@@ -39,6 +39,8 @@ thetahawk-replay-audit = "thetahawk.replay:main"
 thetahawk-option-snapshots = "thetahawk.option_snapshots:main"
 thetahawk-unusual-scan = "thetahawk.unusual_scan:main"
 thetahawk-discover = "thetahawk.discover:main"
+thetahawk-data-status = "thetahawk.data_status:main"
+thetahawk-earnings-validation = "thetahawk.earnings_validation:main"
 
 [tool.setuptools.packages.find]
 include = ["thetahawk*"]

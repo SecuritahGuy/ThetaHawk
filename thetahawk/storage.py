@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .domain import Candidate, EarningsEvent, HistoricalPrice, OptionRight, Quote, RealizedMove, record_payload
+from .run_manifest import ScanRunManifest
 
 
 class ResearchStore:
@@ -72,6 +73,18 @@ class ResearchStore:
                 observed_at TIMESTAMPTZ NOT NULL,
                 payload JSON NOT NULL,
                 PRIMARY KEY (symbol, session_date, source)
+            )
+        """)
+        self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS scan_runs (
+                run_id VARCHAR PRIMARY KEY,
+                scanner VARCHAR NOT NULL,
+                scanner_version VARCHAR NOT NULL,
+                policy_version VARCHAR NOT NULL,
+                code_version VARCHAR NOT NULL,
+                as_of TIMESTAMPTZ NOT NULL,
+                candidate_ids JSON NOT NULL,
+                payload JSON NOT NULL
             )
         """)
 
@@ -153,6 +166,39 @@ class ResearchStore:
                 "INSERT OR REPLACE INTO candidates VALUES (?, ?, ?, ?, ?, ?, ?)", rows
             )
         return len(rows)
+
+    def save_scan_run(self, manifest: ScanRunManifest) -> None:
+        """Persist immutable scan provenance and its exact normalized inputs."""
+        payload = record_payload(manifest)
+        self._connection.execute(
+            "INSERT OR REPLACE INTO scan_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                manifest.run_id,
+                manifest.scanner,
+                manifest.scanner_version,
+                manifest.policy_version,
+                manifest.code_version,
+                manifest.as_of,
+                json.dumps(list(manifest.candidate_ids)),
+                json.dumps(payload),
+            ],
+        )
+
+    def scan_runs_for_candidate(self, candidate_id: str) -> list[dict[str, Any]]:
+        """Return matching manifests newest first, tolerating legacy schemas."""
+        exists = self._connection.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'main' AND table_name = 'scan_runs'"
+        ).fetchone()[0]
+        if not exists:
+            return []
+        rows = self._connection.execute(
+            "SELECT payload FROM scan_runs ORDER BY as_of DESC"
+        ).fetchall()
+        return [
+            json.loads(row[0]) for row in rows
+            if candidate_id in json.loads(row[0]).get("candidate_ids", [])
+        ]
 
     def recent_candidates(self, limit: int = 100) -> list[dict[str, Any]]:
         rows = self._connection.execute(

@@ -7,9 +7,10 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from .csv_inputs import CsvResearchInputs
-from .domain import Candidate, CandidateStatus, EarningsEvent, Quote
+from .domain import Candidate, CandidateStatus, EarningsEvent, Quote, record_payload
 from .providers import AlpacaMarketDataProvider, DemoProvider, MarketDataProvider
 from .scanners import EarningsImpliedMoveScanner, EarningsScanInput
+from .run_manifest import create_scan_run_manifest
 from .settings import Settings
 from .storage import ResearchStore
 
@@ -145,11 +146,26 @@ def run_scan(*, use_alpaca: bool, symbols: tuple[str, ...] | None = None) -> int
             ),
         )))
 
+    manifest = create_scan_run_manifest(
+        scanner=scanner.name,
+        scanner_version="1",
+        policy_version="earnings-screen-policy-v1",
+        as_of=as_of,
+        candidate_ids=tuple(candidate.candidate_id for candidate in candidates),
+        inputs={
+            "symbols": selected_symbols,
+            "policy": record_payload(scanner.policy),
+            "earnings_events": events,
+            "realized_moves": realized_moves,
+            "quotes": quotes,
+        },
+    )
     with ResearchStore(settings.database_path) as store:
         store.save_quotes(quotes)
         store.save_earnings_events(events)
         store.save_realized_moves(realized_moves)
         store.save_candidates(candidates)
+        store.save_scan_run(manifest)
     print(
         f"Scanned {len(events)} earnings events; stored {len(quotes)} quotes and "
         f"{len(candidates)} research records in {settings.database_path}."

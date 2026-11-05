@@ -102,6 +102,7 @@ class RealizedMove:
     realized_move: float
     source: str = "unknown"
     observed_at: datetime = field(default_factory=utc_now)
+    post_event_date: date | None = None
 
 
 @dataclass(frozen=True, slots=True)

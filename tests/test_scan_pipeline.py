@@ -43,8 +43,15 @@ class ScanPipelineTests(unittest.TestCase):
 
             with ResearchStore(Settings.from_env(env).database_path) as store:
                 [candidate] = store.recent_candidates()
+                [manifest] = store.scan_runs_for_candidate(candidate["candidate_id"])
             self.assertEqual(candidate["status"], "suppressed")
             self.assertIn("no option-chain fixture", candidate["summary"])
+            self.assertEqual(manifest["scanner"], "earnings_implied_move")
+            self.assertEqual(manifest["scanner_version"], "1")
+            self.assertEqual(manifest["policy_version"], "earnings-screen-policy-v1")
+            self.assertIn("DEMO:earnings_implied_move", manifest["candidate_ids"][0])
+            self.assertEqual(len(manifest["inputs"]["earnings_events"]), 1)
+            self.assertEqual(manifest["inputs"]["policy"]["min_history"], 4)
 
 
 if __name__ == "__main__":

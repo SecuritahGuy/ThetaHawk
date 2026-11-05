@@ -55,6 +55,7 @@ def run_demo_scan() -> int:
         RealizedMove(
             symbol=symbol,
             event_date=(now - timedelta(days=30 * (index + 1))).date(),
+            post_event_date=(now - timedelta(days=30 * (index + 1) - 1)).date(),
             reference_price=100.0,
             post_event_price=100.0 * (1 + move),
             realized_move=move,

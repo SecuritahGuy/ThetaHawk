@@ -21,8 +21,8 @@ class CsvResearchInputsTests(unittest.TestCase):
                 encoding="utf-8",
             )
             moves_path.write_text(
-                "symbol,event_date,reference_price,post_event_price,observed_at,source\n"
-                "DEMO,2026-08-01,100,108,2026-08-02T10:00:00-04:00,fixture\n",
+                "symbol,event_date,post_event_date,reference_price,post_event_price,observed_at,source\n"
+                "DEMO,2026-08-01,2026-08-03,100,108,2026-08-04T10:00:00-04:00,fixture\n",
                 encoding="utf-8",
             )
             provider = CsvResearchInputs(Settings(
@@ -38,6 +38,7 @@ class CsvResearchInputsTests(unittest.TestCase):
             self.assertEqual(events[0].source, "fixture")
             self.assertEqual(events[0].metadata["expiration_date"], "2026-11-27")
             self.assertEqual(moves[0].realized_move, 0.08)
+            self.assertEqual(moves[0].post_event_date, date(2026, 8, 3))
             self.assertEqual(moves[0].observed_at.utcoffset().total_seconds(), -4 * 3600)
 
     def test_rejects_timezone_naive_observed_at(self) -> None:

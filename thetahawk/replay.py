@@ -34,6 +34,8 @@ def audit_candidate(database_path: str | Path, candidate_id: str) -> dict[str, A
     connection = duckdb.connect(str(path), read_only=True)
     try:
         candidate = _find_candidate(connection, candidate_id)
+        run_manifests = _run_manifests_for_candidate(connection, candidate_id)
+        run_manifest = run_manifests[0] if run_manifests else None
         created_at = _parse_datetime(candidate["created_at"])
         symbol = str(candidate.get("symbol", "")).upper()
         input_ids = {str(value) for value in candidate.get("input_ids", []) if value}
@@ -115,11 +117,19 @@ def audit_candidate(database_path: str | Path, candidate_id: str) -> dict[str, A
         matched_price_ids = {_historical_price_id(row) for row in historical_prices}
         missing_price_ids = sorted(expected_price_ids - matched_price_ids)
 
-        limitations = [
-            "The database has no scan-run manifest containing the scanner policy and code version.",
+        limitations = []
+        if run_manifest is None:
+            limitations.append(
+                "The database has no scan-run manifest containing the scanner policy and code version."
+            )
+        else:
+            limitations.append(
+                "A versioned manifest and exact normalized run inputs are stored, but this scanner has no registered deterministic replay adapter yet."
+            )
+        limitations.extend((
             "The candidate does not identify the exact realized-move row IDs used by the calculation.",
             "A successful audit of stored inputs does not prove that current code would reproduce the stored result.",
-        ]
+        ))
         if missing_contracts:
             limitations.append("One or more candidate option contract IDs did not match a stored quote.")
         if missing_timestamps:
@@ -132,6 +142,7 @@ def audit_candidate(database_path: str | Path, candidate_id: str) -> dict[str, A
         return {
             "audit_type": "stored_input_audit",
             "exact_replay_possible": False,
+            "scan_run_manifest": run_manifest,
             "candidate": candidate,
             "matched_inputs": {
                 "quotes": quote_matches["quotes"],
@@ -162,6 +173,17 @@ def _find_candidate(connection: Any, candidate_id: str) -> dict[str, Any]:
     if not rows:
         raise KeyError(f"Candidate not found: {candidate_id}")
     return _payload(rows[0][0])
+
+
+def _run_manifests_for_candidate(connection: Any, candidate_id: str) -> list[dict[str, Any]]:
+    if not _table_exists(connection, "scan_runs"):
+        return []
+    rows = connection.execute("SELECT payload FROM scan_runs ORDER BY as_of DESC").fetchall()
+    manifests = [_payload(row[0]) for row in rows]
+    return [
+        manifest for manifest in manifests
+        if candidate_id in manifest.get("candidate_ids", [])
+    ]
 
 
 def _rows_before(
