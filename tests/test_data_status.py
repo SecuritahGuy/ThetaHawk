@@ -24,7 +24,13 @@ def test_reports_comparable_contract_history_and_research_input_coverage(tmp_pat
                 source_timestamp=observed,
                 volume=100,
                 source="alpaca:options:indicative",
-                metadata={"contract_symbol": "AAPL261218C00345000"},
+                metadata={
+                    "contract_symbol": "AAPL261218C00345000",
+                    **({
+                        "snapshot_purpose": "reviewed_earnings_event",
+                        "earnings_events": [{"event_id": "AAPL:2026-11-12:fixture"}],
+                    } if sessions == 0 else {}),
+                },
             ))
             sessions += 1
         day += timedelta(days=1)
@@ -54,6 +60,7 @@ def test_reports_comparable_contract_history_and_research_input_coverage(tmp_pat
     [row] = report.symbols
     assert row.symbol == "AAPL"
     assert row.option_snapshot_count == 20
+    assert row.earnings_option_snapshot_count == 1
     assert row.option_contract_count == 1
     assert row.option_session_count == 20
     assert row.max_comparable_sessions == 20

@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, time as local_time, timezone
 from enum import StrEnum
+from functools import partial
 from threading import Event
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -158,13 +159,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run a read-only Thetahawk scan on a fixed market-session interval"
     )
-    parser.add_argument("--job", choices=("earnings", "equity", "options"), default="equity")
+    parser.add_argument(
+        "--job",
+        choices=("earnings", "equity", "options", "earnings-options"),
+        default="equity",
+    )
     parser.add_argument("--symbols", help="Comma-separated symbols; defaults to THETAHAWK_SYMBOLS")
     parser.add_argument(
         "--interval-seconds",
         type=float,
         default=None,
-        help="Delay between runs (default 900 seconds for options, 300 otherwise)",
+        help="Delay between runs (default 900 seconds for option jobs, 300 otherwise)",
     )
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--backoff-base-seconds", type=float, default=5)
@@ -185,15 +190,19 @@ def main() -> int:
     if args.job == "earnings":
         from .scan import run_scan
 
-        job = lambda: run_scan(use_alpaca=True, symbols=symbols)
+        job = partial(run_scan, use_alpaca=True, symbols=symbols)
     elif args.job == "options":
         from .option_snapshots import collect_option_snapshots
 
-        job = lambda: collect_option_snapshots(symbols, settings=settings)
+        job = partial(collect_option_snapshots, symbols, settings=settings)
+    elif args.job == "earnings-options":
+        from .earnings_option_snapshots import collect_earnings_option_snapshots
+
+        job = partial(collect_earnings_option_snapshots, symbols, settings=settings)
     else:
         from .equity_scan import run_equity_scan
 
-        job = lambda: run_equity_scan(symbols=symbols)
+        job = partial(run_equity_scan, symbols=symbols)
 
     runner = ScheduledCollectionRunner(
         job,
@@ -201,7 +210,7 @@ def main() -> int:
         interval_seconds=(
             args.interval_seconds
             if args.interval_seconds is not None
-            else (900 if args.job == "options" else 300)
+            else (900 if args.job in {"options", "earnings-options"} else 300)
         ),
         max_retries=args.max_retries,
         backoff_base_seconds=args.backoff_base_seconds,

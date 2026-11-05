@@ -199,6 +199,7 @@ def _recompute_from_manifest(
         "volatility_divergence": "volatility-divergence-policy-v1",
         "unusual_options_activity": "unusual-options-activity-policy-v1",
         "options_discovery": "integrated-discovery-policy-v1",
+        "event_catalyst": "sec-filing-catalyst-policy-v1",
     }
     if manifest.get("scanner_version") != "1" or expected_policies.get(scanner_name) != manifest.get("policy_version"):
         return {"supported": False, "code_version_matches": False, "matches_stored_candidate": False,
@@ -354,6 +355,25 @@ def _replay_scanner(scanner_name: str, inputs: dict[str, Any], as_of: datetime) 
             )))
         ranked = rank_discoveries(candidates)
         return [*candidates, *_discovery_records(ranked, as_of)]
+    if scanner_name == "event_catalyst":
+        from .sec_filings import SecFiling, filings_to_candidates
+
+        filings = [SecFiling(
+            symbol=str(row["symbol"]),
+            cik=str(row["cik"]),
+            accession_number=str(row["accession_number"]),
+            form_type=str(row["form_type"]),
+            filing_date=_parse_date(row["filing_date"]),
+            acceptance_datetime=_parse_datetime(row["acceptance_datetime"])
+            if row.get("acceptance_datetime") else None,
+            report_date=_parse_date(row["report_date"]) if row.get("report_date") else None,
+            items=tuple(row.get("items") or ()),
+            primary_document=row.get("primary_document"),
+            filing_url=str(row["filing_url"]),
+            observed_at=_parse_datetime(row["observed_at"]),
+            source=str(row.get("source", "sec-edgar:company-submissions")),
+        ) for row in inputs["filings"]]
+        return filings_to_candidates(filings, as_of=as_of)
     raise ValueError(f"No deterministic replay adapter for scanner: {scanner_name}")
 
 

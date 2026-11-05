@@ -30,6 +30,7 @@ class Settings:
     alpaca_stock_feed: str = "iex"
     alpaca_options_feed: str = "indicative"
     alpaca_broker_base_url: str = "https://paper-api.alpaca.markets"
+    sec_user_agent: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_env(cls, environ: dict[str, str] | None = None) -> "Settings":
@@ -69,4 +70,5 @@ class Settings:
             alpaca_broker_base_url=env.get(
                 "THETAHAWK_ALPACA_BROKER_URL", "https://paper-api.alpaca.markets"
             ).rstrip("/"),
+            sec_user_agent=env.get("THETAHAWK_SEC_USER_AGENT") or None,
         )

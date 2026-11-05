@@ -18,6 +18,7 @@ EASTERN = ZoneInfo("America/New_York")
 class SymbolDataStatus:
     symbol: str
     option_snapshot_count: int = 0
+    earnings_option_snapshot_count: int = 0
     option_contract_count: int = 0
     option_session_count: int = 0
     max_comparable_sessions: int = 0
@@ -79,6 +80,11 @@ def inspect_data_coverage(
                 source_time = _parse_datetime(payload.get("source_timestamp")) or observed_at
                 metadata = payload.get("metadata") or {}
                 contract = metadata.get("contract_symbol") if isinstance(metadata, dict) else None
+                if (
+                    isinstance(metadata, dict)
+                    and metadata.get("snapshot_purpose") == "reviewed_earnings_event"
+                ):
+                    item["earnings_option_snapshot_count"] += 1
                 source = str(payload.get("source") or "unknown")
                 try:
                     volume = int(payload["volume"]) if payload.get("volume") is not None else None
@@ -133,6 +139,7 @@ def inspect_data_coverage(
             report_symbols.append(SymbolDataStatus(
                 symbol=symbol,
                 option_snapshot_count=counts["option_snapshot_count"],
+                earnings_option_snapshot_count=counts["earnings_option_snapshot_count"],
                 option_contract_count=len(counts["contracts"]),
                 option_session_count=len(counts["option_sessions"]),
                 max_comparable_sessions=comparable,
@@ -157,6 +164,7 @@ def inspect_data_coverage(
 def _empty_counts() -> dict[str, Any]:
     return {
         "option_snapshot_count": 0,
+        "earnings_option_snapshot_count": 0,
         "contracts": set(),
         "option_sessions": set(),
         "comparable_sessions": {},
@@ -221,7 +229,8 @@ def main() -> int:
     for row in report.symbols:
         possible = "possible" if row.unusual_activity_baseline_possible else "not yet possible"
         print(
-            f"{row.symbol}: {row.option_snapshot_count} option snapshots, "
+            f"{row.symbol}: {row.option_snapshot_count} option snapshots "
+            f"({row.earnings_option_snapshot_count} earnings-linked), "
             f"{row.option_contract_count} contracts, {row.option_session_count} option sessions; "
             f"max same-contract/feed/time-bucket history {row.max_comparable_sessions} "
             f"({possible}); {row.historical_price_rows} equity-history rows; "

@@ -42,11 +42,19 @@ The adapter uses `Ticker.history(period=..., interval="1d", auto_adjust=True)` a
 
 The earnings calendar helper can export Yahoo-reported event dates with `python -m thetahawk.earnings_calendar --symbols AAPL,MSFT --start YYYY-MM-DD --end YYYY-MM-DD`. It leaves timing and expiration blank for operator review. Do not pass the export directly to an earnings scan until timing and expiration have been checked; the scan suppresses events whose timing is unknown. Realized event moves still require a reviewed window and sourced historical prices.
 
+## SEC filing metadata
+
+The optional event-catalyst collector reads SEC company ticker mappings and recent EDGAR submissions metadata. It requires `THETAHAWK_SEC_USER_AGENT` to identify the app and include a contact email; the adapter spaces requests by at least 0.12 seconds. It stores filing date, acceptance timestamp, form, accession number, CIK, items, and the linked filing document. It does not fetch or summarize filing text and does not infer price reaction. The SEC says its [EDGAR APIs](https://www.sec.gov/search-filings/edgar-application-programming-interfaces) require a declared User-Agent and that automated access is limited to 10 requests per second; see also its [webmaster FAQ](https://www.sec.gov/about/webmaster-frequently-asked-questions). The collector currently reads the recent-submissions object only, so older filing ranges may be incomplete.
+
+Set a contact-bearing value in the local `.env`, for example `THETAHAWK_SEC_USER_AGENT=Thetahawk research your-contact@example.com`, then run `python -m thetahawk.sec_filings --symbols AAPL --days-back 7`. The resulting neutral candidates are stored for dashboard/API review.
+
 The scheduled runner uses Alpaca's authenticated read-only market clock to avoid polling outside regular market sessions, including holidays and early closes. Run `python -m thetahawk.scheduled_collection --job equity`; the default interval is five minutes with bounded retries for HTTP 429 responses. Use `--job options --symbols AAPL` to retain one near-term expiration per symbol every 15 minutes; those snapshots form the historical baseline for the unusual-options-activity screen. The simpler `weekday_regular_session` helper is only for tests/local fallback.
 
 ## Next provider milestone
 
 The first scan uses operator-supplied CSVs for upcoming earnings and past realized moves. `earnings.csv` requires symbol, event date, before/after-market timing, chosen option expiration, timezone-aware `observed_at`, and source. `realized_moves.csv` records symbol, event date, `post_event_date` (the date of the post-event price measurement), pre-event reference price, post-event price, timezone-aware `observed_at`, and source; Thetahawk derives the percentage move from the two prices. `post_event_date` is optional when reading legacy CSVs, but required for inclusion in the descriptive earnings validation report. Use one consistent event window (for example, prior regular-session close to the first full regular-session close after the announcement), apply corporate-action adjustments, and record the source. Example headers are in `examples/`. Earnings dates are not inferred from option symbols or LLM prose. A calendar API adapter can replace the CSV input later without changing scanner calculations.
+
+For prospective event-time quote history, run `python -m thetahawk.earnings_option_snapshots --symbols AAPL` after reviewing each event's timing and chosen expiration. The `earnings-options` scheduled job repeats this collection every 15 minutes during open market sessions and adds event IDs, dates, timing, and source to each saved option quote. It skips unreviewed events, events that have passed, and expirations that precede the announcement time.
 
 ## Sources
 

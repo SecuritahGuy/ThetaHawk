@@ -16,7 +16,8 @@ class SettingsTests(unittest.TestCase):
             (root / ".env").write_text(
                 "APCA_API_KEY_ID=local-key\n"
                 "APCA_API_SECRET_KEY=local-secret\n"
-                "THETAHAWK_ALPACA_OPTIONS_FEED=opra\n",
+                "THETAHAWK_ALPACA_OPTIONS_FEED=opra\n"
+                "THETAHAWK_SEC_USER_AGENT=Thetahawk research contact@example.com\n",
                 encoding="utf-8",
             )
             with patch("pathlib.Path.cwd", return_value=root), patch.dict(os.environ, {}, clear=True):
@@ -24,7 +25,9 @@ class SettingsTests(unittest.TestCase):
 
         self.assertEqual(settings.alpaca_key_id, "local-key")
         self.assertEqual(settings.alpaca_options_feed, "opra")
+        self.assertEqual(settings.sec_user_agent, "Thetahawk research contact@example.com")
         self.assertNotIn("local-secret", repr(settings))
+        self.assertNotIn("contact@example.com", repr(settings))
 
 
 if __name__ == "__main__":
