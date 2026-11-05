@@ -32,6 +32,13 @@ _METRIC_KEYS = (
     "contract_symbols",
     "supporting_screens",
     "ranking_basis",
+    "form_type",
+    "filing_date",
+    "acceptance_datetime",
+    "report_date",
+    "accession_number",
+    "filing_url",
+    "items",
 )
 
 

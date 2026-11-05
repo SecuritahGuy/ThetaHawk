@@ -70,6 +70,32 @@ class DashboardCandidateViewTests(unittest.TestCase):
 
         self.assertEqual(results, [self.candidates[1]])
 
+    def test_table_surfaces_sec_filing_context_and_link(self) -> None:
+        candidate = {
+            "symbol": "AAPL",
+            "scanner": "event_catalyst",
+            "status": "research",
+            "summary": "SEC 8-K filing dated 2026-11-05; review source document.",
+            "metrics": {
+                "form_type": "8-K",
+                "filing_date": "2026-11-05",
+                "acceptance_datetime": "2026-11-05T16:30:00+00:00",
+                "report_date": "2026-11-04",
+                "accession_number": "0000320193-26-000001",
+                "filing_url": "https://www.sec.gov/Archives/edgar/data/320193/example.htm",
+                "items": ["2.02"],
+                "filing_source": "sec-edgar:company-submissions",
+            },
+        }
+
+        [row] = _candidate_table_rows([candidate])
+
+        self.assertEqual(row["key_metrics"]["form_type"], "8-K")
+        self.assertEqual(row["key_metrics"]["filing_date"], "2026-11-05")
+        self.assertEqual(row["key_metrics"]["items"], ["2.02"])
+        self.assertIn("https://www.sec.gov/Archives/edgar/data/320193/example.htm", row["key_metrics"]["filing_url"])
+        self.assertIn("sec-edgar:company-submissions", row["sources"])
+
 
 if __name__ == "__main__":
     unittest.main()
