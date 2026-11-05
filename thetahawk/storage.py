@@ -76,6 +76,13 @@ class ResearchStore:
             )
         """)
         self._connection.execute("""
+            CREATE TABLE IF NOT EXISTS option_snapshot_plans (
+                symbol VARCHAR PRIMARY KEY,
+                expiration_date DATE NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+        """)
+        self._connection.execute("""
             CREATE TABLE IF NOT EXISTS scan_runs (
                 run_id VARCHAR PRIMARY KEY,
                 scanner VARCHAR NOT NULL,
@@ -96,6 +103,23 @@ class ResearchStore:
         if rows:
             self._connection.executemany("INSERT INTO quotes VALUES (?, ?, ?, ?, ?)", rows)
         return len(rows)
+
+    def option_snapshot_expiration(self, symbol: str) -> date | None:
+        """Return the active stable expiration selected for session history."""
+        row = self._connection.execute(
+            "SELECT expiration_date FROM option_snapshot_plans WHERE symbol = ?",
+            [symbol.strip().upper()],
+        ).fetchone()
+        return row[0] if row else None
+
+    def save_option_snapshot_expiration(
+        self, symbol: str, expiration: date, *, updated_at: datetime
+    ) -> None:
+        """Pin a stable expiration until it ages out of the collection window."""
+        self._connection.execute(
+            "INSERT OR REPLACE INTO option_snapshot_plans VALUES (?, ?, ?)",
+            [symbol.strip().upper(), expiration, updated_at],
+        )
 
     def save_earnings_events(self, events: Iterable[EarningsEvent]) -> int:
         rows = [

@@ -11,6 +11,19 @@ from thetahawk.storage import ResearchStore
 
 
 class HistoricalPriceStorageTests(unittest.TestCase):
+    def test_persists_stable_option_snapshot_expiration_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with ResearchStore(Path(tmp) / "research.duckdb") as store:
+                self.assertIsNone(store.option_snapshot_expiration("aapl"))
+                store.save_option_snapshot_expiration(
+                    "aapl",
+                    date(2027, 1, 15),
+                    updated_at=datetime(2026, 11, 5, tzinfo=timezone.utc),
+                )
+                self.assertEqual(
+                    store.option_snapshot_expiration("AAPL"), date(2027, 1, 15)
+                )
+
     def test_persists_and_replaces_same_symbol_session_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with ResearchStore(Path(tmp) / "research.duckdb") as store:

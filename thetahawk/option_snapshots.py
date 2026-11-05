@@ -29,6 +29,14 @@ class QuoteStore(Protocol):
     def save_quotes(self, quotes: Sequence[Quote]) -> int: ...
 
 
+class ExpirationPlanStore(QuoteStore, Protocol):
+    def option_snapshot_expiration(self, symbol: str) -> date | None: ...
+
+    def save_option_snapshot_expiration(
+        self, symbol: str, expiration: date, *, updated_at: datetime
+    ) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class OptionSnapshotCollectionResult:
     requested_symbols: int
@@ -69,11 +77,15 @@ def collect_option_snapshots(
     min_dte: int = 14,
     max_dte: int = 45,
     target_dte: int = 30,
+    preserve_expiration: bool = False,
 ) -> OptionSnapshotCollectionResult:
     """Fetch and persist snapshots for at most one eligible expiry per symbol.
 
     Each underlying's expiration list is requested once. Only the chosen expiry
     is sent to the snapshot API, and returned records are rechecked before save.
+    With ``preserve_expiration=True``, the store pins the furthest listed
+    expiration in the configured window and reuses it until it ages below
+    ``min_dte``, giving exact contracts time to mature a session baseline.
     An internally opened DuckDB store is closed before returning; an injected
     store remains owned by its caller.
     """
@@ -102,13 +114,42 @@ def collect_option_snapshots(
                 start=date.fromordinal(today.toordinal() + min_dte),
                 end=date.fromordinal(today.toordinal() + max_dte),
             )
-            expiration = select_expiration(
-                listed,
-                as_of=today,
-                min_dte=min_dte,
-                max_dte=max_dte,
-                target_dte=target_dte,
-            )
+            if preserve_expiration:
+                plan_store = store
+                if not hasattr(plan_store, "option_snapshot_expiration") or not hasattr(
+                    plan_store, "save_option_snapshot_expiration"
+                ):
+                    raise TypeError("preserve_expiration requires an expiration-plan capable store")
+                planned = plan_store.option_snapshot_expiration(symbol)
+                planned_dte = (planned - today).days if planned else -1
+                if planned and min_dte <= planned_dte <= max_dte:
+                    expiration = planned if planned in listed else None
+                    if expiration is None:
+                        logger.warning(
+                            "Skipping %s option snapshot: pinned expiration %s is not in provider listing",
+                            symbol,
+                            planned,
+                        )
+                else:
+                    eligible = [
+                        expiry for expiry in set(listed)
+                        if min_dte <= (expiry - today).days <= max_dte
+                    ]
+                    expiration = max(eligible) if eligible else None
+                    if expiration is not None:
+                        plan_store.save_option_snapshot_expiration(
+                            symbol,
+                            expiration,
+                            updated_at=datetime.now(timezone.utc),
+                        )
+            else:
+                expiration = select_expiration(
+                    listed,
+                    as_of=today,
+                    min_dte=min_dte,
+                    max_dte=max_dte,
+                    target_dte=target_dte,
+                )
             if expiration is None:
                 missing.append(symbol)
                 logger.warning(

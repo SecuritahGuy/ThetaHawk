@@ -30,10 +30,17 @@ class FakeProvider:
 class FakeStore:
     def __init__(self):
         self.quotes = []
+        self.plans = {}
 
     def save_quotes(self, quotes):
         self.quotes.extend(quotes)
         return len(quotes)
+
+    def option_snapshot_expiration(self, symbol):
+        return self.plans.get(symbol)
+
+    def save_option_snapshot_expiration(self, symbol, expiration, *, updated_at):
+        self.plans[symbol] = expiration
 
 
 def option_quote(symbol: str, expiration: date, right: OptionRight) -> Quote:
@@ -105,7 +112,6 @@ class OptionSnapshotCollectionTests(unittest.TestCase):
 
     def test_passes_configured_window_to_expiration_lookup(self) -> None:
         start = date(2026, 11, 20)
-        end = date(2026, 12, 20)
         provider = FakeProvider({"AAPL": []}, {})
 
         collect_option_snapshots(
@@ -129,6 +135,55 @@ class OptionSnapshotCollectionTests(unittest.TestCase):
                 max_dte=45,
                 target_dte=60,
             )
+
+    def test_preserves_furthest_expiration_until_it_ages_out(self) -> None:
+        first = date(2026, 12, 18)
+        farther = date(2027, 1, 15)
+        provider = FakeProvider(
+            {"AAPL": [date(2026, 12, 4), first, farther]},
+            {},
+        )
+        store = FakeStore()
+        settings = Settings(symbols=("AAPL",))
+
+        initial = collect_option_snapshots(
+            settings=settings,
+            provider=provider,
+            store=store,
+            as_of=self.as_of,
+            min_dte=14,
+            max_dte=75,
+            target_dte=75,
+            preserve_expiration=True,
+        )
+        self.assertEqual(initial.selected_expirations, {"AAPL": farther})
+        self.assertEqual(store.plans["AAPL"], farther)
+
+        provider.expirations_by_symbol["AAPL"] = [date(2026, 12, 18), farther]
+        next_day = collect_option_snapshots(
+            settings=settings,
+            provider=provider,
+            store=store,
+            as_of=date(2026, 11, 6),
+            min_dte=14,
+            max_dte=75,
+            target_dte=75,
+            preserve_expiration=True,
+        )
+        self.assertEqual(next_day.selected_expirations, {"AAPL": farther})
+
+        provider.expirations_by_symbol["AAPL"] = [date(2027, 2, 19)]
+        rolled = collect_option_snapshots(
+            settings=settings,
+            provider=provider,
+            store=store,
+            as_of=date(2027, 1, 2),
+            min_dte=14,
+            max_dte=75,
+            target_dte=75,
+            preserve_expiration=True,
+        )
+        self.assertEqual(rolled.selected_expirations, {"AAPL": date(2027, 2, 19)})
 
 
 if __name__ == "__main__":

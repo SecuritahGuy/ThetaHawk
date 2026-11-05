@@ -174,6 +174,8 @@ def main() -> int:
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--backoff-base-seconds", type=float, default=5)
     parser.add_argument("--backoff-max-seconds", type=float, default=60)
+    parser.add_argument("--options-history-min-dte", type=int, default=14)
+    parser.add_argument("--options-history-max-dte", type=int, default=75)
     args = parser.parse_args()
 
     from .providers import AlpacaMarketDataProvider
@@ -194,7 +196,15 @@ def main() -> int:
     elif args.job == "options":
         from .option_snapshots import collect_option_snapshots
 
-        job = partial(collect_option_snapshots, symbols, settings=settings)
+        job = partial(
+            collect_option_snapshots,
+            symbols,
+            settings=settings,
+            min_dte=args.options_history_min_dte,
+            max_dte=args.options_history_max_dte,
+            target_dte=args.options_history_max_dte,
+            preserve_expiration=True,
+        )
     elif args.job == "earnings-options":
         from .earnings_option_snapshots import collect_earnings_option_snapshots
 

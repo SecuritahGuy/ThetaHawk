@@ -30,6 +30,8 @@ def _agent_payload(job: str, label: str) -> dict[str, object]:
             job,
             "--interval-seconds",
             "900",
+            *(["--options-history-min-dte", "14", "--options-history-max-dte", "75"]
+              if job == "options" else []),
         ],
         "WorkingDirectory": str(ROOT),
         "RunAtLoad": True,

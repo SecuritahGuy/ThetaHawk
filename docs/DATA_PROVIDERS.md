@@ -48,7 +48,7 @@ The optional event-catalyst collector reads SEC company ticker mappings and rece
 
 Set a contact-bearing value in the local `.env`, for example `THETAHAWK_SEC_USER_AGENT=Thetahawk research your-contact@example.com`, then run `python -m thetahawk.sec_filings --symbols AAPL --days-back 7`. The resulting neutral candidates are stored for dashboard/API review.
 
-The scheduled runner uses Alpaca's authenticated read-only market clock to avoid polling outside regular market sessions, including holidays and early closes. Run `python -m thetahawk.scheduled_collection --job equity`; the default interval is five minutes with bounded retries for HTTP 429 responses. Use `--job options --symbols AAPL` to retain one near-term expiration per symbol every 15 minutes; those snapshots form the historical baseline for the unusual-options-activity screen. The simpler `weekday_regular_session` helper is only for tests/local fallback.
+The scheduled runner uses Alpaca's authenticated read-only market clock to avoid polling outside regular market sessions, including holidays and early closes. Run `python -m thetahawk.scheduled_collection --job equity`; the default interval is five minutes with bounded retries for HTTP 429 responses. Use `--job options --symbols AAPL` to retain a stable expiration per symbol every 15 minutes. It initially pins the furthest listed expiration within 75 DTE and keeps that exact series until it falls below 14 DTE, allowing contracts to accumulate enough prior sessions before discovery evaluates them around 30 DTE. The one-shot `thetahawk.option_snapshots` command still defaults to the expiration nearest 30 DTE. The simpler `weekday_regular_session` helper is only for tests/local fallback.
 
 ## Next provider milestone
 
