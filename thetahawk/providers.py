@@ -216,12 +216,17 @@ class AlpacaMarketDataProvider:
             params["expiration_date"] = expiration.isoformat()
         page_token: str | None = None
         rows = []
+        broker_base_url = self.settings.alpaca_broker_base_url.rstrip("/")
+        if broker_base_url.endswith("/v2"):
+            broker_path = "/options/contracts"
+        else:
+            broker_path = "/v2/options/contracts"
         while True:
             if page_token:
                 params["page_token"] = page_token
             body = self._get_json(
-                self.settings.alpaca_broker_base_url,
-                "/v2/options/contracts",
+                broker_base_url,
+                broker_path,
                 params,
             )
             rows.extend(body.get("option_contracts", []))

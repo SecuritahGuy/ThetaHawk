@@ -13,7 +13,7 @@ from math import isfinite
 from statistics import median
 from typing import Protocol, Sequence
 
-from .domain import Candidate, CandidateStatus, OptionRight, Quote, RealizedMove
+from .domain import Candidate, CandidateStatus, HistoricalPrice, OptionRight, Quote, RealizedMove
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +37,20 @@ class EarningsScanInput:
     put: Quote
     historical_realized_moves: Sequence[RealizedMove]
     min_history: int = 4
+
+
+@dataclass(frozen=True, slots=True)
+class OverextendedEquityInput:
+    """Current equity quote and chronological, sourced daily closing prices."""
+
+    symbol: str
+    as_of: datetime
+    quote: Quote
+    historical_prices: Sequence[HistoricalPrice]
+    window_sessions: int = 20
+    min_history_prices: int = 60
+    minimum_move_fraction: float = 0.05
+    minimum_robust_z_score: float = 3.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,12 +314,128 @@ class UnusualOptionsActivityScanner:
 
 
 class OverextendedEquityScanner:
-    """Named extension point for statistically unusual underlying moves."""
+    """Flag large multi-session moves that are unusual versus their own history.
+
+    Uses a median/MAD standardized score over overlapping historical returns,
+    which is less sensitive to a few large outliers than mean/std. This screen
+    identifies unusual movement only; it does not predict a reversal.
+    """
 
     name = "overextended_equity"
 
     def scan(self, item: object) -> Candidate:
-        return _not_implemented_candidate(self.name, item)
+        if not isinstance(item, OverextendedEquityInput):
+            return _not_implemented_candidate(self.name, item)
+
+        reasons: list[str] = []
+        risks = (
+            "An unusual move does not imply that price will reverse.",
+            "Historical closes must use consistent split and dividend adjustments.",
+            "A current quote may differ from the official daily close used in the baseline.",
+        )
+        metrics: dict[str, float | int | str | None] = {}
+        status = CandidateStatus.SUPPRESSED
+        score = 0.0
+        quote_time = item.quote.source_timestamp or item.quote.observed_at
+
+        def result() -> Candidate:
+            return Candidate(
+                candidate_id=f"{item.symbol.upper()}:{self.name}:{item.as_of.date().isoformat()}",
+                symbol=item.symbol.upper(),
+                scanner=self.name,
+                score=score,
+                created_at=item.as_of,
+                status=status,
+                summary=reasons[0] if reasons else "Candidate suppressed before evaluation.",
+                rationale=tuple(reasons),
+                risks=risks,
+                input_ids=tuple(
+                    f"{row.symbol.upper()}:{row.timestamp.isoformat()}"
+                    for row in item.historical_prices
+                ),
+                source_timestamps=(quote_time,) + tuple(
+                    row.timestamp for row in item.historical_prices
+                ),
+                metrics=metrics.copy(),
+            )
+
+        if not _is_aware(item.as_of) or not _is_aware(quote_time):
+            reasons.append("Suppressed: scan and quote timestamps must be timezone-aware.")
+            return result()
+        if (
+            item.quote.instrument_type.lower() != "equity"
+            or item.quote.symbol.upper() != item.symbol.upper()
+            or not _valid_quote(item.quote)
+            or item.quote.midpoint is None
+            or item.quote.midpoint <= 0
+        ):
+            reasons.append("Suppressed: current equity quote is missing, invalid, or mismatched.")
+            return result()
+        quote_age = (item.as_of - quote_time).total_seconds()
+        metrics["quote_age_seconds"] = round(quote_age, 1)
+        if quote_age < 0 or quote_age > 900:
+            reasons.append("Suppressed: current equity quote is future-dated or stale.")
+            return result()
+
+        rows = [
+            row for row in item.historical_prices
+            if row.symbol.upper() == item.symbol.upper()
+            and _is_aware(row.timestamp)
+            and row.timestamp < quote_time
+            and row.timestamp <= item.as_of
+            and isfinite(row.close)
+            and row.close > 0
+        ]
+        rows.sort(key=lambda row: row.timestamp)
+        # Keep only one observation for each UTC session date.
+        daily: dict[date, HistoricalPrice] = {}
+        for row in rows:
+            daily[row.timestamp.astimezone(timezone.utc).date()] = row
+        closes = [daily[key] for key in sorted(daily)]
+        window = max(2, item.window_sessions)
+        required = max(window + 2, item.min_history_prices)
+        metrics["history_price_count"] = len(closes)
+        metrics["history_source"] = closes[-1].source if closes else None
+        metrics["adjusted_price_history"] = (
+            all(row.adjusted for row in closes) if closes else None
+        )
+        if len(closes) < required:
+            reasons.append(
+                f"Suppressed: only {len(closes)} usable historical closes; {required} required."
+            )
+            return result()
+
+        price = item.quote.midpoint
+        reference = closes[-window].close
+        current_move = price / reference - 1
+        baseline = [
+            closes[index].close / closes[index - window].close - 1
+            for index in range(window, len(closes))
+        ]
+        baseline_median = median(baseline)
+        mad = median([abs(value - baseline_median) for value in baseline])
+        metrics["window_sessions"] = window
+        metrics["current_window_move_fraction"] = round(current_move, 6)
+        metrics["baseline_median_move_fraction"] = round(baseline_median, 6)
+        metrics["baseline_mad_fraction"] = round(mad, 6)
+        if mad <= 0 or not isfinite(mad):
+            reasons.append("Suppressed: historical move baseline has no usable dispersion.")
+            return result()
+        robust_z = 0.67448975 * (current_move - baseline_median) / mad
+        metrics["robust_z_score"] = round(robust_z, 3)
+        reasons.append(
+            f"{window}-session move is {current_move:+.1%}; its historical robust z-score is {robust_z:+.2f}."
+        )
+        if (
+            abs(current_move) >= item.minimum_move_fraction
+            and abs(robust_z) >= item.minimum_robust_z_score
+        ):
+            status = CandidateStatus.RESEARCH
+            score = min(100.0, abs(robust_z) * 10)
+            reasons.append("Move exceeds configured size and historical-extremeness thresholds; review context.")
+        else:
+            reasons.append("Move does not exceed both configured thresholds.")
+        return result()
 
 
 class VolatilityDivergenceScanner:

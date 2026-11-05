@@ -4,8 +4,13 @@ import unittest
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
-from thetahawk.domain import CandidateStatus, OptionRight, Quote, RealizedMove
-from thetahawk.scanners import EarningsImpliedMoveScanner, EarningsScanInput
+from thetahawk.domain import CandidateStatus, HistoricalPrice, OptionRight, Quote, RealizedMove
+from thetahawk.scanners import (
+    EarningsImpliedMoveScanner,
+    EarningsScanInput,
+    OverextendedEquityInput,
+    OverextendedEquityScanner,
+)
 
 
 class EarningsScannerTests(unittest.TestCase):
@@ -99,6 +104,52 @@ class EarningsScannerTests(unittest.TestCase):
         candidate = EarningsImpliedMoveScanner().scan(replace(item, call=stale_call))
         self.assertEqual(candidate.status, CandidateStatus.SUPPRESSED)
         self.assertIn("quotes are future-dated or stale", candidate.summary)
+
+
+class OverextendedEquityScannerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.as_of = datetime.now(timezone.utc)
+        self.quote = Quote(
+            symbol="DEMO",
+            observed_at=self.as_of,
+            source_timestamp=self.as_of,
+            bid=119.9,
+            ask=120.1,
+            source="fixture",
+        )
+        self.history = tuple(
+            HistoricalPrice(
+                symbol="DEMO",
+                timestamp=self.as_of - timedelta(days=65 - index + 1),
+                close=100 + index * 0.03 + ((index * 7) % 11) * 0.07,
+                source="fixture",
+                adjusted=True,
+            )
+            for index in range(65)
+        )
+
+    def test_flags_large_extreme_move_against_robust_baseline(self) -> None:
+        candidate = OverextendedEquityScanner().scan(OverextendedEquityInput(
+            symbol="DEMO",
+            as_of=self.as_of,
+            quote=self.quote,
+            historical_prices=self.history,
+        ))
+
+        self.assertEqual(candidate.status, CandidateStatus.RESEARCH)
+        self.assertGreater(candidate.metrics["robust_z_score"], 3.5)
+        self.assertIn("does not imply", candidate.risks[0])
+
+    def test_suppresses_insufficient_price_history(self) -> None:
+        candidate = OverextendedEquityScanner().scan(OverextendedEquityInput(
+            symbol="DEMO",
+            as_of=self.as_of,
+            quote=self.quote,
+            historical_prices=self.history[:40],
+        ))
+
+        self.assertEqual(candidate.status, CandidateStatus.SUPPRESSED)
+        self.assertIn("historical closes", candidate.summary)
 
 
 if __name__ == "__main__":

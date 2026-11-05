@@ -89,6 +89,27 @@ class AlpacaProviderTests(unittest.TestCase):
         )
         self.assertIsNone(_parse_occ_symbol("not-an-option"))
 
+    def test_option_contract_endpoint_accepts_versioned_or_root_base_url(self) -> None:
+        for base_url, expected_base, expected_path in (
+            ("https://paper-api.alpaca.markets", "https://paper-api.alpaca.markets", "/v2/options/contracts"),
+            ("https://paper-api.alpaca.markets/v2", "https://paper-api.alpaca.markets/v2", "/options/contracts"),
+        ):
+            with self.subTest(base_url=base_url):
+                provider = AlpacaMarketDataProvider(Settings(
+                    alpaca_key_id="key",
+                    alpaca_secret_key="secret",
+                    alpaca_broker_base_url=base_url,
+                ))
+                calls = []
+
+                def fake_get(self, base, path, params):
+                    calls.append((base, path))
+                    return {"option_contracts": []}
+
+                provider._get_json = MethodType(fake_get, provider)
+                self.assertEqual(provider._get_option_contracts("AAPL", None), [])
+                self.assertEqual(calls, [(expected_base, expected_path)])
+
 
 if __name__ == "__main__":
     unittest.main()

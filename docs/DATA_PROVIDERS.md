@@ -19,6 +19,8 @@ THETAHAWK_ALPACA_OPTIONS_FEED=indicative
 
 `opra` may be selected only if the account has the needed market-data entitlement. Use `/v2/options/contracts` only for contract metadata; `THETAHAWK_ALPACA_BROKER_URL` defaults to Alpaca's paper API base URL. The adapter itself contains no trading operations.
 
+`THETAHAWK_ALPACA_BROKER_URL` accepts either the host root (`https://paper-api.alpaca.markets`) or a versioned base (`https://paper-api.alpaca.markets/v2`). The contract metadata adapter normalizes both forms.
+
 ## Other options
 
 | Provider | Useful capability | Limitation for this project |

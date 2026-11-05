@@ -104,6 +104,17 @@ class RealizedMove:
     observed_at: datetime = field(default_factory=utc_now)
 
 
+@dataclass(frozen=True, slots=True)
+class HistoricalPrice:
+    """A sourced historical daily close used by equity screens."""
+
+    symbol: str
+    timestamp: datetime
+    close: float
+    source: str = "unknown"
+    adjusted: bool = False
+
+
 def record_payload(record: Any) -> dict[str, Any]:
     """Convert a dataclass to JSON-friendly values without losing enum names."""
     def convert(value: Any) -> Any:

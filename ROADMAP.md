@@ -11,7 +11,8 @@ The initial product is research only. Every candidate is an idea for a person to
 ### Implementation status
 
 - In place: local domain/storage, fictional demo path, deterministic earnings comparison, read-only Alpaca market-data adapter, timestamped CSV event/outcome inputs, one-shot scan/ingest commands, and read-only dashboard/API.
-- Remaining: test the live adapter with actual entitlements, source an event calendar/history dataset, add scheduled scanning with market-calendar and rate-limit handling, replay scans from stored snapshots, and implement the other four screening modules.
+- In progress: an overextended-equity screen now compares a current 20-session move with its robust historical baseline; Alpaca's configured IEX equity and indicative options endpoints have passed a read-only live smoke check.
+- Remaining: source an event calendar/history dataset, add scheduled scanning with market-calendar and rate-limit handling, replay scans from stored snapshots, and implement the unusual-options-activity, volatility-divergence, and event-catalyst screens.
 - No data subscription or live order connection is configured.
 
 ### Deliverable
@@ -22,7 +23,7 @@ A local Python application that ingests or loads market/event data, stores snaps
 
 1. Earnings implied-move divergence: compare the option-implied move with a defined history of realized earnings moves, keeping event dates and data availability explicit.
 2. Unusual options activity: flag abnormal volume/open-interest observations only where comparable historical baselines exist.
-3. Overextended equities: flag statistically unusual moves against a configurable history.
+3. Overextended equities: flag statistically unusual moves against a configurable history. **Initial median/MAD implementation in place; historical-price ingestion remains to be wired.**
 4. Volatility divergence: compare implied and realized volatility with contract/liquidity checks.
 5. Event catalyst: associate earnings, filings, revisions, and news with candidates; every item carries provider and observed-at timestamps.
 
