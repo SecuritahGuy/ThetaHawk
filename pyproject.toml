@@ -38,6 +38,7 @@ thetahawk-scheduled-collection = "thetahawk.scheduled_collection:main"
 thetahawk-replay-audit = "thetahawk.replay:main"
 thetahawk-option-snapshots = "thetahawk.option_snapshots:main"
 thetahawk-unusual-scan = "thetahawk.unusual_scan:main"
+thetahawk-discover = "thetahawk.discover:main"
 
 [tool.setuptools.packages.find]
 include = ["thetahawk*"]

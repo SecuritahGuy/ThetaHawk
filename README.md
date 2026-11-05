@@ -8,7 +8,7 @@ Provider capabilities and the Alpaca read-only adapter are described in [docs/DA
 
 ## Project status
 
-Phase 1 is in progress. Read-only Alpaca equity/options/clock access, timestamped CSV earnings inputs, the earnings and equity screens, initial IV/RV and unusual-activity screens, scheduled snapshot collection, and the local demo path are in place. Yahoo adjusted daily prices are a temporary historical equity source. The commands currently screen supplied/configured symbols individually; an integrated ranked options-discovery pass across the configured universe is the next product milestone. The earnings calendar export leaves timing unknown for review; exact scan replay and event-time options history are still open validation items.
+Phase 1 is in progress. Read-only Alpaca equity/options/clock access, timestamped CSV earnings inputs, the earnings and equity screens, initial IV/RV and unusual-activity screens, scheduled snapshot collection, an integrated ranked discovery command, and the local demo path are in place. Yahoo adjusted daily prices are a temporary historical equity source. Discovery enumerates eligible expirations in the configured universe, selects liquid near-ATM pairs, runs available screens, and stores ranked groups with their supporting evidence. The initial universe is explicit; it does not search every listed stock. The earnings calendar export leaves timing unknown for review; exact scan replay and event-time options history are still open validation items.
 
 ## Planned local stack
 
@@ -38,6 +38,8 @@ The overextended-equity screen uses an Alpaca current quote and Yahoo Finance ad
 To prepare upcoming earnings dates for review, run `python -m thetahawk.earnings_calendar --symbols AAPL,MSFT --start YYYY-MM-DD --end YYYY-MM-DD`. It exports Yahoo's reported dates to `data/yahoo_earnings_review.csv` without guessing announcement timing or option expiration. Review those fields before copying the rows into the configured earnings input CSV; the earnings scanner suppresses events with unknown timing.
 
 The initial IV/RV screen can be run with `python -m thetahawk.volatility_scan --symbols AAPL`; it uses current Alpaca option/equity snapshots and Yahoo daily history. To seed unusual-activity history, run `python -m thetahawk.option_snapshots --symbols AAPL` once per session or schedule it with `python -m thetahawk.scheduled_collection --job options --symbols AAPL` (default 15-minute delay). After enough same-contract snapshots have accumulated, run `python -m thetahawk.unusual_scan --symbols AAPL`. Equity and earnings jobs default to a five-minute delay. Scheduled jobs use Alpaca's market clock and bounded retry behavior. Inspect stored evidence for a candidate with `python -m thetahawk.replay CANDIDATE_ID`; this is an input audit, not an exact recomputation, until run manifests are added.
+
+Run the integrated ranked options-discovery pass with `python -m thetahawk.discover` or `thetahawk-discover`. It defaults to `THETAHAWK_SYMBOLS` and supports `--symbols AAPL,MSFT` plus `--history-period 1y`. Results and the underlying screen records are saved to DuckDB and are available in the dashboard/API. Ranking counts distinct screens that met their own research thresholds; it does not blend their scores or estimate profitability. Unusual-activity evidence will remain suppressed until the database contains enough comparable same-contract history.
 
 ## Research-only boundary
 
