@@ -12,8 +12,9 @@ The initial product is research only. Every candidate is an idea for a person to
 
 - In place: local domain/storage, fictional demo path, earnings and overextended-equity screens, Yahoo adjusted daily-close ingestion, Alpaca read-only equity/options/market-clock adapters, CSV event/outcome inputs, Yahoo earnings-date review export, scheduled option-snapshot collection, IV/RV and unusual-activity scan commands, and a replay input-audit command.
 - In progress: build enough same-contract options snapshots for a meaningful unusual-activity baseline, and complete end-to-end historical validation for the initial screens. Alpaca equity, indicative options, and market-clock endpoints have passed read-only live checks.
-- Remaining: reviewed earnings timing and realized event-history data, exact scan recomputation from versioned run manifests, broader UI/report review, and the event-catalyst screen.
+- Remaining: reviewed earnings timing and realized event-history data, exact scan recomputation from versioned run manifests, broader UI/report review, the event-catalyst screen, and an integrated options-discovery pass over the configured universe.
 - Replay currently audits matching stored inputs and explicitly reports that exact recomputation is not possible without scan-run and policy metadata.
+- Current commands can enumerate and filter contracts for a supplied/configured symbol, but they run individual screens. They do not yet discover and rank options opportunities across the universe in one pass.
 - No paid data subscription is assumed, and no live order connection is configured.
 
 ### Deliverable
@@ -27,6 +28,12 @@ A local Python application that ingests or loads market/event data, stores snaps
 3. Overextended equities: flag statistically unusual moves against a configurable history. **Initial median/MAD implementation and optional Yahoo history ingestion in place.**
 4. Volatility divergence: compare implied and realized volatility with contract/liquidity checks. **Initial IV/RV screen and one-shot CLI implemented and exercised on AAPL with Alpaca snapshots and Yahoo history.**
 5. Event catalyst: associate earnings, filings, revisions, and news with candidates; every item carries provider and observed-at timestamps.
+
+### Options-discovery workflow
+
+The Phase 1 discovery target is a configurable 50–100-symbol universe, not every listed stock or option contract. For each symbol, the scan should enumerate eligible expirations and contracts, apply quote freshness, spread, volume, open-interest, moneyness, and event-window checks, run the relevant research screens, and return a deduplicated ranked list with source records and reasons. A screen may identify a symbol first and then choose the contracts used to measure that screen. The result is a research candidate for review; it is never an order.
+
+The current option commands are building blocks: the IV/RV scan selects a near-ATM pair near 30 DTE, and snapshot collection records one expiration near 30 DTE per supplied symbol. The missing milestone is coordinating these selectors and screen results into one discover-and-rank workflow. Dynamic market-wide symbol discovery can come later; the initial universe remains explicit and configurable.
 
 ### Phase 1 boundaries
 

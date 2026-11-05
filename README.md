@@ -8,7 +8,7 @@ Provider capabilities and the Alpaca read-only adapter are described in [docs/DA
 
 ## Project status
 
-Phase 1 is in progress. Read-only Alpaca equity/options/clock access, timestamped CSV earnings inputs, the earnings and equity screens, initial IV/RV and unusual-activity screens, scheduled snapshot collection, and the local demo path are in place. Yahoo adjusted daily prices are a temporary historical equity source. The earnings calendar export leaves timing unknown for review; exact scan replay and event-time options history are still open validation items.
+Phase 1 is in progress. Read-only Alpaca equity/options/clock access, timestamped CSV earnings inputs, the earnings and equity screens, initial IV/RV and unusual-activity screens, scheduled snapshot collection, and the local demo path are in place. Yahoo adjusted daily prices are a temporary historical equity source. The commands currently screen supplied/configured symbols individually; an integrated ranked options-discovery pass across the configured universe is the next product milestone. The earnings calendar export leaves timing unknown for review; exact scan replay and event-time options history are still open validation items.
 
 ## Planned local stack
 
