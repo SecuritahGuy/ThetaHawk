@@ -16,7 +16,7 @@ from typing import Any, Callable, Iterable
 
 import requests
 
-from .domain import Candidate, CandidateStatus, record_payload
+from .domain import Candidate, CandidateStatus
 from .run_manifest import create_scan_run_manifest
 from .settings import Settings
 from .storage import ResearchStore
@@ -183,7 +183,7 @@ def filing_to_candidate(
     )
     status = CandidateStatus.SUPPRESSED if future_accepted else CandidateStatus.RESEARCH
     summary = (
-        f"Suppressed: SEC acceptance timestamp is after the scan time."
+        "Suppressed: SEC acceptance timestamp is after the scan time."
         if future_accepted
         else f"SEC {filing.form_type} filing dated {filing.filing_date.isoformat()}; review source document."
     )

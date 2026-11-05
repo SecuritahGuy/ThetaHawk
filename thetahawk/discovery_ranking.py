@@ -80,7 +80,7 @@ def rank_discoveries(candidates: Iterable[Candidate]) -> list[RankedDiscovery]:
             candidate.scanner
             for candidate in related
             if candidate.status == CandidateStatus.RESEARCH
-            and candidate.scanner != "contract_selection"
+            and candidate.scanner not in {"contract_selection", "event_catalyst"}
         }))
         suppressed = tuple(sorted({
             candidate.scanner

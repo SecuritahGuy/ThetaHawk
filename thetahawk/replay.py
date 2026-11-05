@@ -353,6 +353,25 @@ def _replay_scanner(scanner_name: str, inputs: dict[str, Any], as_of: datetime) 
                 current=_quote_from_payload(row["current"]),
                 history=[_quote_from_payload(quote) for quote in row["history"]],
             )))
+        if inputs.get("include_sec_filings", False):
+            from .sec_filings import SecFiling, filings_to_candidates
+
+            filings = [SecFiling(
+                symbol=str(row["symbol"]),
+                cik=str(row["cik"]),
+                accession_number=str(row["accession_number"]),
+                form_type=str(row["form_type"]),
+                filing_date=_parse_date(row["filing_date"]),
+                acceptance_datetime=_parse_datetime(row["acceptance_datetime"])
+                if row.get("acceptance_datetime") else None,
+                report_date=_parse_date(row["report_date"]) if row.get("report_date") else None,
+                items=tuple(row.get("items") or ()),
+                primary_document=row.get("primary_document"),
+                filing_url=str(row["filing_url"]),
+                observed_at=_parse_datetime(row["observed_at"]),
+                source=str(row.get("source", "sec-edgar:company-submissions")),
+            ) for row in inputs.get("sec_filings", [])]
+            candidates.extend(filings_to_candidates(filings, as_of=as_of))
         ranked = rank_discoveries(candidates)
         return [*candidates, *_discovery_records(ranked, as_of)]
     if scanner_name == "event_catalyst":

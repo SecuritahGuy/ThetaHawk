@@ -1,9 +1,10 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from thetahawk.discover import run_discovery
 from thetahawk.domain import OptionRight, Quote, record_payload
 from thetahawk.replay import audit_candidate
 from thetahawk.settings import Settings
+from thetahawk.sec_filings import SecFiling
 from thetahawk.storage import ResearchStore
 
 
@@ -54,6 +55,36 @@ class FakeMarketProvider:
 class FakeHistoryProvider:
     def get_daily_prices(self, symbol, *, period="1y"):
         return []
+
+
+class FakeSecProvider:
+    def __init__(self, filings=None, error=None):
+        self.filings = list(filings or [])
+        self.error = error
+        self.calls = []
+
+    def get_filings(self, symbols, *, start, end):
+        self.calls.append((tuple(symbols), start, end))
+        if self.error:
+            raise self.error
+        return self.filings
+
+
+def _filing(symbol="AAPL"):
+    now = datetime.now(timezone.utc)
+    return SecFiling(
+        symbol=symbol,
+        cik="0000320193",
+        accession_number="0000320193-26-000001",
+        form_type="8-K",
+        filing_date=now.date(),
+        acceptance_datetime=now - timedelta(minutes=1),
+        report_date=now.date(),
+        items=("2.02",),
+        primary_document="aapl-20261105.htm",
+        filing_url="https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/aapl.htm",
+        observed_at=now,
+    )
 
 
 class MemoryStore:
@@ -158,6 +189,66 @@ def test_integrated_discovery_recomputes_from_its_manifest(tmp_path):
 
     audit = audit_candidate(settings.database_path, aggregate["candidate_id"])
 
+    assert result.discoveries
+    assert audit["exact_replay_possible"] is True
+    assert audit["recomputation"]["matches_stored_candidate"] is True
+
+
+def test_sec_filings_are_opt_in_context_and_not_ranking_support(tmp_path, monkeypatch):
+    monkeypatch.setattr("thetahawk.discover.ResearchStore", MemoryStore)
+    settings = Settings(database_path=tmp_path / "research.duckdb")
+    provider = FakeSecProvider([_filing()])
+
+    default_result = run_discovery(
+        symbols=["AAPL"], settings=settings,
+        market_provider=FakeMarketProvider(), history_provider=FakeHistoryProvider(),
+        sec_provider=provider,
+    )
+    assert provider.calls == []
+    assert not any(candidate.scanner == "event_catalyst" for candidate in default_result.screen_candidates)
+
+    result = run_discovery(
+        symbols=["AAPL"], settings=settings,
+        market_provider=FakeMarketProvider(), history_provider=FakeHistoryProvider(),
+        include_sec_filings=True, sec_provider=provider,
+    )
+    assert len(provider.calls) == 1
+    sec_candidate = next(candidate for candidate in result.screen_candidates if candidate.scanner == "event_catalyst")
+    assert all("event_catalyst" not in item.supporting_screens for item in result.discoveries)
+    assert any(sec_candidate.candidate_id == candidate.candidate_id for candidate in result.discoveries[0].candidates)
+    baseline_counts = {item.discovery_id: item.research_screen_count for item in default_result.discoveries}
+    assert all(item.research_screen_count == baseline_counts[item.discovery_id] for item in result.discoveries)
+    manifest = MemoryStore.manifests[-1]
+    assert manifest["inputs"]["include_sec_filings"] is True
+    assert manifest["inputs"]["sec_filings"][0]["accession_number"] == sec_candidate.metrics["accession_number"]
+
+
+def test_sec_provider_failure_is_recorded_and_market_discovery_continues(tmp_path, monkeypatch):
+    monkeypatch.setattr("thetahawk.discover.ResearchStore", MemoryStore)
+    result = run_discovery(
+        symbols=["AAPL"], settings=Settings(database_path=tmp_path / "research.duckdb"),
+        market_provider=FakeMarketProvider(), history_provider=FakeHistoryProvider(),
+        include_sec_filings=True, sec_provider=FakeSecProvider(error=ConnectionError("SEC unavailable")),
+    )
+    assert result.discoveries
+    assert result.errors == ("SEC filings: ConnectionError: SEC unavailable",)
+    manifest = MemoryStore.manifests[-1]
+    assert manifest["inputs"]["include_sec_filings"] is True
+    assert manifest["inputs"]["sec_filings"] == []
+
+
+def test_integrated_discovery_with_sec_filings_replays_exactly(tmp_path):
+    settings = Settings(database_path=tmp_path / "research.duckdb")
+    result = run_discovery(
+        symbols=["AAPL"], settings=settings,
+        market_provider=FakeMarketProvider(), history_provider=FakeHistoryProvider(),
+        include_sec_filings=True, sec_provider=FakeSecProvider([_filing()]),
+    )
+    with ResearchStore(settings.database_path) as store:
+        rows = store.recent_candidates(100)
+        aggregate = next(row for row in rows if row["scanner"] == "options_discovery")
+
+    audit = audit_candidate(settings.database_path, aggregate["candidate_id"])
     assert result.discoveries
     assert audit["exact_replay_possible"] is True
     assert audit["recomputation"]["matches_stored_candidate"] is True

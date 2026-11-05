@@ -19,6 +19,7 @@ from .scanners import (
     VolatilityDivergenceScanner,
 )
 from .settings import Settings
+from .sec_filings import SecCompanyFilingsProvider, SecFiling, filings_to_candidates
 from .storage import ResearchStore
 from .run_manifest import create_scan_run_manifest
 from .unusual_activity import UnusualOptionsActivityInput, UnusualOptionsActivityScanner
@@ -47,6 +48,9 @@ def run_discovery(
     settings: Settings | None = None,
     market_provider=None,
     history_provider=None,
+    include_sec_filings: bool = False,
+    sec_provider=None,
+    sec_days_back: int = 7,
 ) -> DiscoveryRun:
     """Enumerate liquid near-ATM pairs, run available screens, rank, and persist.
 
@@ -62,6 +66,8 @@ def run_discovery(
     ))
     if not selected:
         raise ValueError("At least one symbol is required")
+    if sec_days_back < 1:
+        raise ValueError("sec_days_back must be positive")
     market_provider = market_provider or AlpacaMarketDataProvider(settings)
     history_provider = history_provider or YahooHistoricalPriceProvider()
     collection_started_at = datetime.now(timezone.utc)
@@ -106,6 +112,19 @@ def run_discovery(
     # Provider timestamps can be a fraction of a second newer than request
     # start; define the scan's evaluation time after all observations arrive.
     as_of = datetime.now(timezone.utc)
+    sec_filings: list[SecFiling] = []
+    sec_candidates: list[Candidate] = []
+    if include_sec_filings:
+        try:
+            provider = sec_provider or SecCompanyFilingsProvider(user_agent=settings.sec_user_agent or "")
+            sec_filings = provider.get_filings(
+                selected,
+                start=as_of.date() - timedelta(days=sec_days_back),
+                end=as_of.date(),
+            )
+            sec_candidates = filings_to_candidates(sec_filings, as_of=as_of)
+        except Exception as exc:
+            errors.append(f"SEC filings: {type(exc).__name__}: {exc}")
     selected_pairs: list[OptionPairSelection] = []
     candidates: list[Candidate] = []
     equity_scanner = OverextendedEquityScanner()
@@ -169,6 +188,8 @@ def run_discovery(
                     "history": history,
                 }
 
+        candidates.extend(sec_candidates)
+
         all_option_quotes = [quote for rows in chains.values() for quote in rows]
         all_history = [row for rows in histories.values() for row in rows]
         store.save_quotes([*equity_quotes, *all_option_quotes])
@@ -231,6 +252,9 @@ def run_discovery(
                 "option_quotes_by_symbol": chains,
                 "historical_prices_by_symbol": histories,
                 "unusual_activity_inputs_by_candidate": unusual_inputs_by_candidate,
+                "include_sec_filings": include_sec_filings,
+                "sec_days_back": sec_days_back,
+                "sec_filings": sec_filings,
             },
         )
         store.save_scan_run(manifest)
@@ -344,9 +368,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run integrated read-only options discovery")
     parser.add_argument("--symbols", help="Comma-separated symbols; defaults to THETAHAWK_SYMBOLS")
     parser.add_argument("--history-period", choices=("6mo", "1y", "2y", "5y"), default="1y")
+    parser.add_argument("--include-sec-filings", action="store_true",
+                        help="Include recent SEC filing headers as contextual evidence")
+    parser.add_argument("--sec-days-back", type=int, default=7,
+                        help="Inclusive SEC filing lookback window (default: 7 days)")
     args = parser.parse_args()
     symbols = tuple(part.strip().upper() for part in args.symbols.split(",") if part.strip()) if args.symbols else None
-    result = run_discovery(symbols=symbols, history_period=args.history_period)
+    result = run_discovery(
+        symbols=symbols,
+        history_period=args.history_period,
+        include_sec_filings=args.include_sec_filings,
+        sec_days_back=args.sec_days_back,
+    )
     print(
         f"Scanned {len(result.symbols)} symbols; selected {len(result.selected_pairs)} liquid near-ATM pairs; "
         f"ranked {len(result.discoveries)} discovery groups."
