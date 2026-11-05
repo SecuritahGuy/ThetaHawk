@@ -10,6 +10,8 @@ from thetahawk.scanners import (
     EarningsScanInput,
     OverextendedEquityInput,
     OverextendedEquityScanner,
+    VolatilityDivergenceInput,
+    VolatilityDivergenceScanner,
 )
 
 
@@ -151,6 +153,74 @@ class OverextendedEquityScannerTests(unittest.TestCase):
 
         self.assertEqual(candidate.status, CandidateStatus.SUPPRESSED)
         self.assertIn("historical closes", candidate.summary)
+
+
+class VolatilityDivergenceScannerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.as_of = datetime.now(timezone.utc)
+        self.spot = Quote(
+            symbol="DEMO",
+            observed_at=self.as_of,
+            source_timestamp=self.as_of,
+            bid=99.9,
+            ask=100.1,
+            source="fixture:equity",
+        )
+        self.history = tuple(
+            HistoricalPrice(
+                symbol="DEMO",
+                session_date=(self.as_of - timedelta(days=65 - index + 1)).date(),
+                close=100 + index * 0.01 + (index % 3) * 0.02,
+                source="fixture:history",
+                observed_at=self.as_of,
+                adjusted=True,
+            )
+            for index in range(65)
+        )
+        expiry = (self.as_of + timedelta(days=30)).date()
+        self.options = tuple(
+            Quote(
+                symbol="DEMO",
+                instrument_type="option",
+                expiration=expiry,
+                strike=100,
+                right=right,
+                observed_at=self.as_of,
+                source_timestamp=self.as_of,
+                bid=2.9,
+                ask=3.1,
+                volume=20,
+                open_interest=500,
+                implied_volatility=0.6,
+                source="fixture:options",
+                metadata={"open_interest_date": self.as_of.date().isoformat()},
+            )
+            for right in (OptionRight.CALL, OptionRight.PUT)
+        )
+
+    def test_flags_near_atm_iv_that_diverges_from_realized_volatility(self) -> None:
+        candidate = VolatilityDivergenceScanner().scan(VolatilityDivergenceInput(
+            symbol="DEMO",
+            as_of=self.as_of,
+            underlying_quote=self.spot,
+            option_quotes=self.options,
+            historical_prices=self.history,
+        ))
+
+        self.assertEqual(candidate.status, CandidateStatus.RESEARCH)
+        self.assertGreater(candidate.metrics["iv_to_rv_ratio"], 1.25)
+
+    def test_suppresses_when_history_is_insufficient(self) -> None:
+        candidate = VolatilityDivergenceScanner().scan(VolatilityDivergenceInput(
+            symbol="DEMO",
+            as_of=self.as_of,
+            underlying_quote=self.spot,
+            option_quotes=self.options,
+            historical_prices=self.history[:15],
+        ))
+
+        self.assertEqual(candidate.status, CandidateStatus.SUPPRESSED)
+        self.assertIn("usable closes", candidate.summary)
 
 
 if __name__ == "__main__":

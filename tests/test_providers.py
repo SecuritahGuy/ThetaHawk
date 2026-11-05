@@ -79,6 +79,44 @@ class AlpacaProviderTests(unittest.TestCase):
         self.assertEqual(quote.metadata["open_interest_date"], "2026-11-04")
         self.assertEqual(quote.source, "alpaca:options:indicative")
 
+    def test_lists_distinct_option_expirations_from_contract_metadata(self) -> None:
+        provider = self.provider()
+        provider._get_option_contracts = MethodType(
+            lambda self, symbol, expiration, **kwargs: [
+                {"symbol": "AAPL261120C00200000"},
+                {"symbol": "AAPL261120P00200000"},
+                {"symbol": "AAPL261218C00200000"},
+            ],
+            provider,
+        )
+
+        expirations = provider.get_option_expirations(
+            "AAPL", start=date(2026, 12, 1)
+        )
+
+        self.assertEqual(expirations, [date(2026, 12, 18)])
+
+    def test_market_clock_accepts_root_and_versioned_broker_urls(self) -> None:
+        for base_url, expected_base, expected_path in (
+            ("https://paper-api.alpaca.markets", "https://paper-api.alpaca.markets", "/v2/clock"),
+            ("https://paper-api.alpaca.markets/v2", "https://paper-api.alpaca.markets/v2", "/clock"),
+        ):
+            with self.subTest(base_url=base_url):
+                provider = AlpacaMarketDataProvider(Settings(
+                    alpaca_key_id="key",
+                    alpaca_secret_key="secret",
+                    alpaca_broker_base_url=base_url,
+                ))
+                calls = []
+
+                def fake_get(self, base, path, params):
+                    calls.append((base, path, params))
+                    return {"is_open": True, "next_open": "2026-11-06T09:30:00-05:00"}
+
+                provider._get_json = MethodType(fake_get, provider)
+                self.assertTrue(provider.get_market_clock()["is_open"])
+                self.assertEqual(calls, [(expected_base, expected_path, {})])
+
     def test_requires_credentials_and_parses_occ_contracts(self) -> None:
         with self.assertRaisesRegex(ValueError, "APCA_API_KEY_ID"):
             AlpacaMarketDataProvider(Settings())

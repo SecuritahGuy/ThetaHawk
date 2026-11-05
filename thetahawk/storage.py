@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from .domain import Candidate, EarningsEvent, HistoricalPrice, Quote, RealizedMove, record_payload
+from .domain import Candidate, EarningsEvent, HistoricalPrice, OptionRight, Quote, RealizedMove, record_payload
 
 
 class ResearchStore:
@@ -118,6 +119,29 @@ class ResearchStore:
             )
         return len(rows)
 
+    def option_quotes(
+        self,
+        symbol: str,
+        *,
+        from_observed_at: datetime | None = None,
+        before_observed_at: datetime | None = None,
+    ) -> list[Quote]:
+        """Load stored option snapshots for scanner baselines and review."""
+        predicates = ["symbol = ?", "instrument_type = 'option'"]
+        parameters: list[Any] = [symbol.strip().upper()]
+        if from_observed_at is not None:
+            predicates.append("observed_at >= ?")
+            parameters.append(from_observed_at)
+        if before_observed_at is not None:
+            predicates.append("observed_at < ?")
+            parameters.append(before_observed_at)
+        rows = self._connection.execute(
+            "SELECT payload FROM quotes WHERE " + " AND ".join(predicates)
+            + " ORDER BY observed_at",
+            parameters,
+        ).fetchall()
+        return [_quote_from_payload(json.loads(row[0])) for row in rows]
+
     def save_candidates(self, candidates: Iterable[Candidate]) -> int:
         rows = [
             (c.candidate_id, c.symbol, c.scanner, c.created_at, c.score,
@@ -144,3 +168,30 @@ class ResearchStore:
 
     def __exit__(self, *_: object) -> None:
         self.close()
+
+
+def _quote_from_payload(payload: dict[str, Any]) -> Quote:
+    def parse_datetime(value: str | None) -> datetime | None:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+    expiration = payload.get("expiration")
+    right = payload.get("right")
+    return Quote(
+        symbol=payload["symbol"],
+        observed_at=parse_datetime(payload["observed_at"]),
+        bid=payload.get("bid"),
+        ask=payload.get("ask"),
+        last=payload.get("last"),
+        volume=payload.get("volume"),
+        open_interest=payload.get("open_interest"),
+        instrument_type=payload.get("instrument_type", "equity"),
+        expiration=date.fromisoformat(expiration) if expiration else None,
+        strike=payload.get("strike"),
+        right=OptionRight(right) if right else None,
+        implied_volatility=payload.get("implied_volatility"),
+        delta=payload.get("delta"),
+        source=payload.get("source", "unknown"),
+        source_timestamp=parse_datetime(payload.get("source_timestamp")),
+        currency=payload.get("currency", "USD"),
+        metadata=payload.get("metadata") or {},
+    )

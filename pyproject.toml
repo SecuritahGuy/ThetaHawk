@@ -32,6 +32,12 @@ thetahawk-dashboard = "thetahawk.dashboard:main"
 thetahawk-ingest = "thetahawk.ingest:main"
 thetahawk-scan = "thetahawk.scan:main"
 thetahawk-equity-scan = "thetahawk.equity_scan:main"
+thetahawk-earnings-calendar = "thetahawk.earnings_calendar:main"
+thetahawk-volatility-scan = "thetahawk.volatility_scan:main"
+thetahawk-scheduled-collection = "thetahawk.scheduled_collection:main"
+thetahawk-replay-audit = "thetahawk.replay:main"
+thetahawk-option-snapshots = "thetahawk.option_snapshots:main"
+thetahawk-unusual-scan = "thetahawk.unusual_scan:main"
 
 [tool.setuptools.packages.find]
 include = ["thetahawk*"]

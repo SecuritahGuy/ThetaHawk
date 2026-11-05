@@ -10,9 +10,10 @@ The initial product is research only. Every candidate is an idea for a person to
 
 ### Implementation status
 
-- In place: local domain/storage, fictional demo path, deterministic earnings comparison, read-only Alpaca market-data adapter, timestamped CSV event/outcome inputs, one-shot scan/ingest commands, and read-only dashboard/API.
-- In progress: an overextended-equity screen compares a current 20-session move with its robust historical baseline and can source adjusted daily closes from Yahoo; Alpaca's configured IEX equity and indicative options endpoints have passed a read-only live smoke check.
-- Remaining: source an earnings calendar and realized event-history dataset, add scheduled scanning with market-calendar and rate-limit handling, replay scans from stored snapshots, and implement the unusual-options-activity, volatility-divergence, and event-catalyst screens.
+- In place: local domain/storage, fictional demo path, earnings and overextended-equity screens, Yahoo adjusted daily-close ingestion, Alpaca read-only equity/options/market-clock adapters, CSV event/outcome inputs, Yahoo earnings-date review export, scheduled option-snapshot collection, IV/RV and unusual-activity scan commands, and a replay input-audit command.
+- In progress: build enough same-contract options snapshots for a meaningful unusual-activity baseline, and complete end-to-end historical validation for the initial screens. Alpaca equity, indicative options, and market-clock endpoints have passed read-only live checks.
+- Remaining: reviewed earnings timing and realized event-history data, exact scan recomputation from versioned run manifests, broader UI/report review, and the event-catalyst screen.
+- Replay currently audits matching stored inputs and explicitly reports that exact recomputation is not possible without scan-run and policy metadata.
 - No paid data subscription is assumed, and no live order connection is configured.
 
 ### Deliverable
@@ -22,9 +23,9 @@ A local Python application that ingests or loads market/event data, stores snaps
 ### Initial screens
 
 1. Earnings implied-move divergence: compare the option-implied move with a defined history of realized earnings moves, keeping event dates and data availability explicit.
-2. Unusual options activity: flag abnormal volume/open-interest observations only where comparable historical baselines exist.
+2. Unusual options activity: flag abnormal volume/open-interest observations only where comparable historical baselines exist. **Same-contract, same-source, same-time-bucket screen and stored-snapshot CLI implemented; requires at least 20 comparable prior sessions.**
 3. Overextended equities: flag statistically unusual moves against a configurable history. **Initial median/MAD implementation and optional Yahoo history ingestion in place.**
-4. Volatility divergence: compare implied and realized volatility with contract/liquidity checks.
+4. Volatility divergence: compare implied and realized volatility with contract/liquidity checks. **Initial IV/RV screen and one-shot CLI implemented and exercised on AAPL with Alpaca snapshots and Yahoo history.**
 5. Event catalyst: associate earnings, filings, revisions, and news with candidates; every item carries provider and observed-at timestamps.
 
 ### Phase 1 boundaries
@@ -69,7 +70,7 @@ A local Python application that ingests or loads market/event data, stores snaps
 - Python application with typed domain models and provider interfaces.
 - Polars/NumPy/SciPy for deterministic analytics; DuckDB and Parquet for local research storage.
 - FastAPI for a local read-only API and Streamlit for the first dashboard.
-- APScheduler for configurable jobs, with market-calendar and provider-rate-limit controls.
+- Fixed-delay scheduled collection for configurable jobs, with Alpaca market-clock and provider-rate-limit controls. Revisit APScheduler if orchestration needs grow.
 - Optional Apple MLX LM server for evidence-grounded narrative generation; default model selection is documented in `docs/LOCAL_MODEL.md`.
 - Provider adapters selected only after verifying field coverage, historical depth, latency, retention, usage rights, and cost for the intended workflow.
 

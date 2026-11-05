@@ -136,6 +136,47 @@ class AlpacaMarketDataProvider:
             ))
         return result
 
+    def get_market_clock(self) -> dict[str, object]:
+        """Return Alpaca's read-only market clock for a holiday-aware session gate."""
+        broker_base_url = self.settings.alpaca_broker_base_url.rstrip("/")
+        broker_path = "/clock" if broker_base_url.endswith("/v2") else "/v2/clock"
+        body = self._get_json(broker_base_url, broker_path, {})
+        if not isinstance(body.get("is_open"), bool):
+            raise ValueError("Alpaca market clock response is missing boolean is_open")
+        return body
+
+    def get_option_expirations(
+        self,
+        symbol: str,
+        *,
+        start: date | None = None,
+        end: date | None = None,
+    ) -> list[date]:
+        """List active option expirations from contract metadata."""
+        underlying = symbol.strip().upper()
+        if not underlying:
+            return []
+        if start is not None and end is not None and end < start:
+            raise ValueError("end expiration must be on or after start expiration")
+        dates = set()
+        for contract in self._get_option_contracts(
+            underlying,
+            None,
+            expiration_start=start,
+            expiration_end=end,
+        ):
+            contract_symbol = contract.get("symbol")
+            parsed = _parse_occ_symbol(str(contract_symbol or ""))
+            if parsed is None:
+                continue
+            expiration = parsed[0]
+            if start is not None and expiration < start:
+                continue
+            if end is not None and expiration > end:
+                continue
+            dates.add(expiration)
+        return sorted(dates)
+
     def get_option_quotes(self, symbol: str, expiration: date | None = None) -> list[Quote]:
         underlying = symbol.strip().upper()
         if not underlying:
@@ -206,7 +247,14 @@ class AlpacaMarketDataProvider:
                 break
         return result
 
-    def _get_option_contracts(self, symbol: str, expiration: date | None) -> list[dict]:
+    def _get_option_contracts(
+        self,
+        symbol: str,
+        expiration: date | None,
+        *,
+        expiration_start: date | None = None,
+        expiration_end: date | None = None,
+    ) -> list[dict]:
         params: dict[str, object] = {
             "underlying_symbols": symbol,
             "status": "active",
@@ -214,6 +262,11 @@ class AlpacaMarketDataProvider:
         }
         if expiration is not None:
             params["expiration_date"] = expiration.isoformat()
+        else:
+            if expiration_start is not None:
+                params["expiration_date_gte"] = expiration_start.isoformat()
+            if expiration_end is not None:
+                params["expiration_date_lte"] = expiration_end.isoformat()
         page_token: str | None = None
         rows = []
         broker_base_url = self.settings.alpaca_broker_base_url.rstrip("/")

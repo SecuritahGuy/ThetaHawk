@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from thetahawk.domain import HistoricalPrice
+from thetahawk.domain import HistoricalPrice, OptionRight, Quote
 from thetahawk.storage import ResearchStore
 
 
@@ -38,6 +38,33 @@ class HistoricalPriceStorageTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(json.loads(rows[0][0])["close"], 251.0)
+
+    def test_loads_option_quotes_with_contract_and_feed_provenance(self) -> None:
+        observed_at = datetime(2026, 11, 5, 15, 0, tzinfo=timezone.utc)
+        quote = Quote(
+            symbol="AAPL",
+            instrument_type="option",
+            expiration=date(2026, 12, 4),
+            strike=345.0,
+            right=OptionRight.CALL,
+            observed_at=observed_at,
+            source_timestamp=observed_at,
+            bid=4.9,
+            ask=5.1,
+            volume=125,
+            open_interest=850,
+            source="alpaca:options:indicative",
+            metadata={"contract_symbol": "AAPL261204C00345000"},
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with ResearchStore(Path(tmp) / "research.duckdb") as store:
+                store.save_quotes([quote])
+                [loaded] = store.option_quotes("aapl")
+
+        self.assertEqual(loaded.right, OptionRight.CALL)
+        self.assertEqual(loaded.expiration, date(2026, 12, 4))
+        self.assertEqual(loaded.source, quote.source)
+        self.assertEqual(loaded.metadata["contract_symbol"], "AAPL261204C00345000")
 
 
 if __name__ == "__main__":
