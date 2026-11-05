@@ -43,6 +43,7 @@ thetahawk-unusual-scan = "thetahawk.unusual_scan:main"
 thetahawk-discover = "thetahawk.discover:main"
 thetahawk-data-status = "thetahawk.data_status:main"
 thetahawk-earnings-validation = "thetahawk.earnings_validation:main"
+thetahawk-equity-backtest = "thetahawk.equity_backtest:main"
 
 [tool.setuptools.packages.find]
 include = ["thetahawk*"]

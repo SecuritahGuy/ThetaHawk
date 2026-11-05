@@ -51,6 +51,8 @@ Check whether the local database has enough comparable option history with `pyth
 
 Review available earnings outcome coverage with `python -m thetahawk.earnings_validation` or `thetahawk-earnings-validation`. The report only matches candidates with a scan date before the event and a later, uniquely linked realized move that has an explicit `post_event_date`. It reports descriptive move error and sample size; it is not a strategy backtest. Existing CSV outcome rows without `post_event_date` are excluded until that measurement date is reviewed and supplied.
 
+For a limited price-only check of the overextended-equity screen, run `python -m thetahawk.equity_backtest`. It applies the current thresholds walk-forward to stored adjusted daily closes, groups repeated crossings into episodes, and measures 5- and 20-session close-based returns from the next session's close. This does not test option screens, fills, or profitability; read the report's sample sizes and limitations before interpreting it.
+
 ## Research-only boundary
 
 All outputs are candidates for human review, not trade instructions. Numeric calculations and risk checks belong in deterministic code. There is no live order execution in the roadmap's first three implementation phases; paper trading is a later, explicitly reviewed phase.
