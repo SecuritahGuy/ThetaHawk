@@ -19,8 +19,8 @@ class Settings:
     timezone: str = "America/Chicago"
     stale_quote_seconds: int = 900
     demo_mode: bool = True
-    ollama_url: str | None = None
-    ollama_model: str = "gpt-oss:20b"
+    mlx_server_url: str = "http://127.0.0.1:8080/v1"
+    mlx_model: str = "Qwen/Qwen3-8B-MLX-4bit"
 
     @classmethod
     def from_env(cls, environ: dict[str, str] | None = None) -> "Settings":
@@ -33,7 +33,6 @@ class Settings:
         except ValueError:
             stale = 900
         demo = env.get("THETAHAWK_DEMO_MODE", "true").strip().lower() not in {"0", "false", "no"}
-        ollama_url = env.get("THETAHAWK_OLLAMA_URL") or None
         return cls(
             data_dir=data_dir,
             database_path=db_path,
@@ -41,6 +40,6 @@ class Settings:
             timezone=env.get("THETAHAWK_TIMEZONE", "America/Chicago"),
             stale_quote_seconds=stale,
             demo_mode=demo,
-            ollama_url=ollama_url,
-            ollama_model=env.get("THETAHAWK_OLLAMA_MODEL", "gpt-oss:20b"),
+            mlx_server_url=env.get("THETAHAWK_MLX_SERVER_URL", "http://127.0.0.1:8080/v1"),
+            mlx_model=env.get("THETAHAWK_MLX_MODEL", "Qwen/Qwen3-8B-MLX-4bit"),
         )

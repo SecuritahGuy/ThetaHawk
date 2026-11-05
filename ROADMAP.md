@@ -26,7 +26,7 @@ A local Python application that ingests or loads market/event data, stores snaps
 - Provide provider interfaces and a local/demo input path before committing to a paid feed. Keep provider-specific behavior and licensing constraints explicit.
 - Persist raw/normalized observations and scan results locally (DuckDB/Parquet); never silently treat missing or delayed data as current.
 - Use a scheduler that can respect market calendars, provider limits, and market-hours configuration. Begin with on-demand and scheduled scans; continuous real-time monitoring is not an MVP requirement.
-- Use a local model through an optional Ollama adapter only after deterministic candidates exist. Structured reports cite their input records; no model-generated numeric output is trusted.
+- Use the local MLX model through an optional OpenAI-compatible loopback endpoint only after deterministic candidates exist. Structured reports cite their input records; no model-generated numeric output is trusted.
 - Dashboard is local and read-only for this phase. Alerts can be added after candidate quality and noise are understood.
 
 ### Acceptance criteria
@@ -63,7 +63,7 @@ A local Python application that ingests or loads market/event data, stores snaps
 - Polars/NumPy/SciPy for deterministic analytics; DuckDB and Parquet for local research storage.
 - FastAPI for a local read-only API and Streamlit for the first dashboard.
 - APScheduler for configurable jobs, with market-calendar and provider-rate-limit controls.
-- Optional Ollama integration for evidence-grounded narrative generation.
+- Optional Apple MLX LM server for evidence-grounded narrative generation; default model selection is documented in `docs/LOCAL_MODEL.md`.
 - Provider adapters selected only after verifying field coverage, historical depth, latency, retention, usage rights, and cost for the intended workflow.
 
 ## First implementation workstreams
