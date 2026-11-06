@@ -6,8 +6,10 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from thetahawk.scheduled_collection import (
+    CombinedSnapshotResult,
     RunStatus,
     ScheduledCollectionRunner,
+    collect_serially,
     weekday_regular_session,
 )
 
@@ -21,6 +23,39 @@ class RateLimitedFailure(Exception):
 
 
 class ScheduledCollectionTests(unittest.TestCase):
+    def test_option_collectors_run_serially_and_aggregate_summary(self) -> None:
+        calls = []
+
+        class HistoryResult:
+            fetched_quotes = 10
+            saved_quotes = 9
+            symbols_with_expiration = 2
+            symbols_without_eligible_expiration = ("NOOPT",)
+
+        class EarningsResult:
+            fetched_quotes = 4
+            saved_quotes = 4
+            eligible_events = 1
+            requested_chains = 1
+            failed_chains = ()
+            skipped_events = ("unreviewed",)
+
+        result = collect_serially(
+            lambda: calls.append("history") or HistoryResult(),
+            lambda: calls.append("earnings") or EarningsResult(),
+        )
+
+        self.assertIsInstance(result, CombinedSnapshotResult)
+        self.assertEqual(calls, ["history", "earnings"])
+        self.assertEqual(result.saved_quotes, 13)
+        self.assertEqual(result.fetched_quotes, 14)
+        self.assertEqual(result.symbols_with_expiration, 2)
+        self.assertEqual(result.symbols_without_eligible_expiration, ("NOOPT",))
+        self.assertEqual(result.eligible_events, 1)
+        self.assertEqual(result.requested_chains, 1)
+        self.assertEqual(result.failed_chains, ())
+        self.assertEqual(result.skipped_events, ("unreviewed",))
+
     def test_market_calendar_rate_limit_uses_bounded_retry(self) -> None:
         calendar_calls = []
         delays = []

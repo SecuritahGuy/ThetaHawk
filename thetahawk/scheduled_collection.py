@@ -37,6 +37,60 @@ class RunResult:
     error: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class CombinedSnapshotResult:
+    options_history: object
+    earnings_events: object
+
+    @property
+    def saved_quotes(self) -> int:
+        return sum(
+            int(getattr(result, "saved_quotes", 0))
+            for result in (self.options_history, self.earnings_events)
+        )
+
+    @property
+    def fetched_quotes(self) -> int:
+        return sum(
+            int(getattr(result, "fetched_quotes", 0))
+            for result in (self.options_history, self.earnings_events)
+        )
+
+    @property
+    def symbols_with_expiration(self) -> int:
+        return int(getattr(self.options_history, "symbols_with_expiration", 0))
+
+    @property
+    def symbols_without_eligible_expiration(self) -> tuple[str, ...]:
+        return tuple(getattr(self.options_history, "symbols_without_eligible_expiration", ()))
+
+    @property
+    def eligible_events(self) -> int:
+        return int(getattr(self.earnings_events, "eligible_events", 0))
+
+    @property
+    def requested_chains(self) -> int:
+        return int(getattr(self.earnings_events, "requested_chains", 0))
+
+    @property
+    def failed_chains(self) -> tuple[str, ...]:
+        return tuple(getattr(self.earnings_events, "failed_chains", ()))
+
+    @property
+    def skipped_events(self) -> tuple[str, ...]:
+        return tuple(getattr(self.earnings_events, "skipped_events", ()))
+
+
+def collect_serially(
+    options_history_job: Callable[[], object],
+    earnings_snapshot_job: Callable[[], object],
+) -> CombinedSnapshotResult:
+    """Run both option collectors sequentially to avoid concurrent DuckDB writers."""
+    history = options_history_job()
+    earnings = earnings_snapshot_job()
+    return CombinedSnapshotResult(history, earnings)
+
+
 class RateLimitError(RuntimeError):
     """Provider signals that the request should be retried after a delay."""
 
@@ -180,7 +234,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--job",
-        choices=("earnings", "equity", "options", "earnings-options"),
+        choices=("earnings", "equity", "options", "earnings-options", "options-and-earnings"),
         default="equity",
     )
     parser.add_argument("--symbols", help="Comma-separated symbols; defaults to THETAHAWK_SYMBOLS")
@@ -228,6 +282,23 @@ def main() -> int:
         from .earnings_option_snapshots import collect_earnings_option_snapshots
 
         job = partial(collect_earnings_option_snapshots, symbols, settings=settings)
+    elif args.job == "options-and-earnings":
+        from .earnings_option_snapshots import collect_earnings_option_snapshots
+        from .option_snapshots import collect_option_snapshots
+
+        job = partial(
+            collect_serially,
+            partial(
+                collect_option_snapshots,
+                symbols,
+                settings=settings,
+                min_dte=args.options_history_min_dte,
+                max_dte=args.options_history_max_dte,
+                target_dte=args.options_history_max_dte,
+                preserve_expiration=True,
+            ),
+            partial(collect_earnings_option_snapshots, symbols, settings=settings),
+        )
     else:
         from .equity_scan import run_equity_scan
 
@@ -239,7 +310,7 @@ def main() -> int:
         interval_seconds=(
             args.interval_seconds
             if args.interval_seconds is not None
-            else (900 if args.job in {"options", "earnings-options"} else 300)
+            else (900 if args.job in {"options", "earnings-options", "options-and-earnings"} else 300)
         ),
         max_retries=args.max_retries,
         backoff_base_seconds=args.backoff_base_seconds,

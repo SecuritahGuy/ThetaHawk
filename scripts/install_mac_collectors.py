@@ -11,14 +11,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-JOBS = {
-    "options": "com.thetahawk.options-collector",
-    "earnings-options": "com.thetahawk.earnings-options-collector",
-}
+JOBS = {"options-and-earnings": "com.thetahawk.options-collector"}
+LEGACY_LABELS = ("com.thetahawk.earnings-options-collector",)
 
 
 def _agent_payload(job: str, label: str) -> dict[str, object]:
     data_dir = ROOT / "data"
+    log_name = "options" if job == "options-and-earnings" else job
     return {
         "Label": label,
         "ProgramArguments": [
@@ -31,7 +30,7 @@ def _agent_payload(job: str, label: str) -> dict[str, object]:
             "--interval-seconds",
             "900",
             *(["--options-history-min-dte", "14", "--options-history-max-dte", "75"]
-              if job == "options" else []),
+              if job in {"options", "options-and-earnings"} else []),
         ],
         "WorkingDirectory": str(ROOT),
         "RunAtLoad": True,
@@ -39,8 +38,8 @@ def _agent_payload(job: str, label: str) -> dict[str, object]:
         "ThrottleInterval": 60,
         "ProcessType": "Background",
         "EnvironmentVariables": {"PYTHONUNBUFFERED": "1"},
-        "StandardOutPath": str(data_dir / f"{job}.log"),
-        "StandardErrorPath": str(data_dir / f"{job}.err.log"),
+        "StandardOutPath": str(data_dir / f"{log_name}.log"),
+        "StandardErrorPath": str(data_dir / f"{log_name}.err.log"),
     }
 
 
@@ -61,6 +60,12 @@ def install() -> None:
     launch_agents = Path.home() / "Library" / "LaunchAgents"
     launch_agents.mkdir(parents=True, exist_ok=True)
     domain = f"gui/{os.getuid()}"
+    for label in LEGACY_LABELS:
+        plist_path = launch_agents / f"{label}.plist"
+        _launchctl("bootout", domain, str(plist_path), check=False)
+        if plist_path.exists():
+            plist_path.unlink()
+        _launchctl("disable", f"{domain}/{label}", check=False)
     for job, label in JOBS.items():
         plist_path = launch_agents / f"{label}.plist"
         with plist_path.open("wb") as stream:
@@ -74,7 +79,7 @@ def install() -> None:
 def uninstall() -> None:
     domain = f"gui/{os.getuid()}"
     launch_agents = Path.home() / "Library" / "LaunchAgents"
-    for label in JOBS.values():
+    for label in (*JOBS.values(), *LEGACY_LABELS):
         plist_path = launch_agents / f"{label}.plist"
         _launchctl("bootout", domain, str(plist_path), check=False)
         if plist_path.exists():
@@ -86,14 +91,14 @@ def uninstall() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group()
-    action.add_argument("--uninstall", action="store_true", help="Stop and remove both LaunchAgents")
-    action.add_argument("--status", action="store_true", help="Show launchd status for both collectors")
+    action.add_argument("--uninstall", action="store_true", help="Stop and remove collection LaunchAgents")
+    action.add_argument("--status", action="store_true", help="Show launchd status for collection agents")
     args = parser.parse_args()
     if args.uninstall:
         uninstall()
     elif args.status:
         domain = f"gui/{os.getuid()}"
-        for label in JOBS.values():
+        for label in (*JOBS.values(), *LEGACY_LABELS):
             result = _launchctl("print", f"{domain}/{label}", check=False)
             if result.returncode == 0:
                 print(result.stdout.strip())
