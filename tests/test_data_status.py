@@ -54,6 +54,11 @@ def test_reports_comparable_contract_history_and_research_input_coverage(tmp_pat
             realized_move=0.04,
             post_event_date=date(2026, 8, 3),
         ),))
+        store.save_option_snapshot_expiration(
+            "AAPL",
+            date(2027, 1, 15),
+            updated_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        )
 
     report = inspect_data_coverage(database)
 
@@ -65,6 +70,7 @@ def test_reports_comparable_contract_history_and_research_input_coverage(tmp_pat
     assert row.option_session_count == 20
     assert row.last_option_session_date == date(2026, 10, 28)
     assert row.last_option_snapshot_at == max(quote.observed_at for quote in quotes)
+    assert row.planned_option_expiration_date == date(2027, 1, 15)
     assert row.max_comparable_sessions == 20
     assert row.unusual_activity_baseline_possible is True
     assert row.historical_price_rows == 1

@@ -23,6 +23,7 @@ class SymbolDataStatus:
     option_session_count: int = 0
     last_option_session_date: date | None = None
     last_option_snapshot_at: datetime | None = None
+    planned_option_expiration_date: date | None = None
     max_comparable_sessions: int = 0
     unusual_activity_baseline_possible: bool = False
     historical_price_rows: int = 0
@@ -120,6 +121,14 @@ def inspect_data_coverage(
                         key = (str(contract), source, bucket)
                         item["comparable_sessions"].setdefault(key, set()).add(session)
 
+        if "option_snapshot_plans" in tables:
+            for symbol, expiration in connection.execute(
+                "SELECT symbol, expiration_date FROM option_snapshot_plans"
+            ).fetchall():
+                grouped.setdefault(str(symbol).strip().upper(), _empty_counts())[
+                    "planned_option_expiration_date"
+                ] = expiration
+
         _count_table(connection, tables, grouped, "historical_prices", "historical_price_rows")
         _count_table(connection, tables, grouped, "earnings_events", "earnings_event_rows")
         _count_table(connection, tables, grouped, "realized_moves", "realized_move_rows")
@@ -156,6 +165,7 @@ def inspect_data_coverage(
                 option_session_count=len(counts["option_sessions"]),
                 last_option_session_date=counts["last_option_session_date"],
                 last_option_snapshot_at=counts["last_option_snapshot_at"],
+                planned_option_expiration_date=counts["planned_option_expiration_date"],
                 max_comparable_sessions=comparable,
                 unusual_activity_baseline_possible=(comparable >= minimum_baseline_sessions),
                 historical_price_rows=counts["historical_price_rows"],
@@ -183,6 +193,7 @@ def _empty_counts() -> dict[str, Any]:
         "option_sessions": set(),
         "last_option_session_date": None,
         "last_option_snapshot_at": None,
+        "planned_option_expiration_date": None,
         "comparable_sessions": {},
         "historical_price_rows": 0,
         "earnings_event_rows": 0,
@@ -250,6 +261,7 @@ def main() -> int:
             f"({row.earnings_option_snapshot_count} earnings-linked), "
             f"{row.option_contract_count} contracts, {row.option_session_count} option sessions; "
             f"latest session {row.last_option_session_date or 'none'}; "
+            f"pinned expiry {row.planned_option_expiration_date or 'none'}; "
             f"latest snapshot {row.last_option_snapshot_at.isoformat() if row.last_option_snapshot_at else 'none'}; "
             f"max same-contract/feed/time-bucket history {row.max_comparable_sessions} "
             f"({possible}); {row.historical_price_rows} equity-history rows; "
