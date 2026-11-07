@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import requests
 
 from thetahawk.scheduled_collection import (
     CombinedSnapshotResult,
+    DailyEarningsScreenJob,
     RunStatus,
     ScheduledCollectionRunner,
     collect_serially,
+    reviewed_upcoming_event_symbols,
     weekday_regular_session,
 )
+from thetahawk.settings import Settings
 
 
 class FakeResponse:
@@ -46,14 +51,24 @@ class ScheduledCollectionTests(unittest.TestCase):
             discoveries = ("ranked-group", "second-group")
             errors = ()
 
+        class EarningsScreenResult:
+            status = "scanned"
+            symbols = ("NVDA",)
+            error = None
+
+            @property
+            def symbol_count(self):
+                return len(self.symbols)
+
         result = collect_serially(
             lambda: calls.append("history") or HistoryResult(),
             lambda: calls.append("earnings") or EarningsResult(),
             lambda: calls.append("discovery") or DiscoveryResult(),
+            lambda: calls.append("earnings-screen") or EarningsScreenResult(),
         )
 
         self.assertIsInstance(result, CombinedSnapshotResult)
-        self.assertEqual(calls, ["history", "earnings", "discovery"])
+        self.assertEqual(calls, ["history", "earnings", "discovery", "earnings-screen"])
         self.assertEqual(result.saved_quotes, 13)
         self.assertEqual(result.fetched_quotes, 14)
         self.assertEqual(result.saved_events, 1)
@@ -66,6 +81,85 @@ class ScheduledCollectionTests(unittest.TestCase):
         self.assertEqual(result.selected_pairs, 1)
         self.assertEqual(result.discovery_groups, 2)
         self.assertEqual(result.discovery_errors, 0)
+        self.assertEqual(result.earnings_screen_symbols, 1)
+        self.assertEqual(result.earnings_screen_status, "scanned")
+
+    def test_reviewed_upcoming_event_filter_requires_timing_and_expiration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "earnings.csv"
+            path.write_text(
+                "symbol,event_date,timing,expiration_date,observed_at,source\n"
+                "NVDA,2026-11-17,after_close,2026-11-20,2026-11-05T12:00:00Z,official\n"
+                "AAPL,2026-11-17,,2026-11-20,2026-11-05T12:00:00Z,unreviewed\n"
+                "MSFT,2026-11-17,after_close,2026-11-17,2026-11-05T12:00:00Z,too-early-expiry\n"
+                "GOOG,2026-11-17,after_close,2026-11-20,2026-11-10T12:00:00Z,not-yet-known\n"
+                "AMZN,2026-11-04,after_close,2026-11-20,2026-11-01T12:00:00Z,past-event\n",
+                encoding="utf-8",
+            )
+            settings = Settings(earnings_csv_path=path)
+
+            selected = reviewed_upcoming_event_symbols(
+                settings,
+                ("NVDA", "AAPL", "MSFT", "GOOG", "AMZN"),
+                as_of=datetime(2026, 11, 6, 15, 0, tzinfo=timezone.utc),
+            )
+
+        self.assertEqual(selected, ("NVDA",))
+
+    def test_daily_earnings_screen_runs_only_for_reviewed_symbols_once_per_day(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            event_path = Path(tmp) / "earnings.csv"
+            event_path.write_text(
+                "symbol,event_date,timing,expiration_date,observed_at,source\n"
+                "NVDA,2026-11-17,after_close,2026-11-20,2026-11-05T12:00:00Z,official\n"
+                "AAPL,2026-11-17,,2026-11-20,2026-11-05T12:00:00Z,unreviewed\n",
+                encoding="utf-8",
+            )
+            settings = Settings(earnings_csv_path=event_path)
+            current = [datetime(2026, 11, 6, 15, 0, tzinfo=timezone.utc)]
+            calls = []
+
+            def scan(**kwargs):
+                calls.append(kwargs)
+                return 0
+
+            job = DailyEarningsScreenJob(
+                settings, ("NVDA", "AAPL", "MSFT"), scan, now=lambda: current[0]
+            )
+
+            first = job()
+            second = job()
+            current[0] = datetime(2026, 11, 9, 15, 0, tzinfo=timezone.utc)
+            third = job()
+
+        self.assertEqual(first.status, "scanned")
+        self.assertEqual(first.symbols, ("NVDA",))
+        self.assertEqual(second.status, "already_scanned_today")
+        self.assertEqual(third.status, "scanned")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], {"use_alpaca": True, "symbols": ("NVDA",)})
+
+    def test_daily_earnings_screen_reports_scan_failure_and_can_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            event_path = Path(tmp) / "earnings.csv"
+            event_path.write_text(
+                "symbol,event_date,timing,expiration_date,observed_at,source\n"
+                "NVDA,2026-11-17,after_close,2026-11-20,2026-11-05T12:00:00Z,official\n",
+                encoding="utf-8",
+            )
+            settings = Settings(earnings_csv_path=event_path)
+            job = DailyEarningsScreenJob(
+                settings,
+                ("NVDA",),
+                lambda **_kwargs: (_ for _ in ()).throw(ConnectionError("offline")),
+                now=lambda: datetime(2026, 11, 6, 15, 0, tzinfo=timezone.utc),
+            )
+
+            result = job()
+
+        self.assertEqual(result.status, "earnings_scan_failed")
+        self.assertIn("offline", result.error)
+        self.assertIsNone(job.last_successful_day)
 
     def test_market_calendar_rate_limit_uses_bounded_retry(self) -> None:
         calendar_calls = []

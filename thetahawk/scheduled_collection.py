@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import time
 from dataclasses import dataclass
-from datetime import datetime, time as local_time, timezone
+from datetime import date, datetime, timedelta, time as local_time, timezone
 from enum import StrEnum
 from functools import partial
 from threading import Event
@@ -42,6 +42,7 @@ class CombinedSnapshotResult:
     options_history: object
     earnings_events: object
     discovery: object | None = None
+    earnings_screen: object | None = None
 
     @property
     def saved_quotes(self) -> int:
@@ -100,17 +101,148 @@ class CombinedSnapshotResult:
         errors = getattr(self.discovery, "errors", None)
         return len(errors) if errors is not None else None
 
+    @property
+    def earnings_screen_symbols(self) -> int | None:
+        count = getattr(self.earnings_screen, "symbol_count", None)
+        return int(count) if count is not None else None
+
+    @property
+    def earnings_screen_status(self) -> str | None:
+        status = getattr(self.earnings_screen, "status", None)
+        return str(status) if status is not None else None
+
+    @property
+    def earnings_screen_error(self) -> str | None:
+        error = getattr(self.earnings_screen, "error", None)
+        return str(error) if error is not None else None
+
 
 def collect_serially(
     options_history_job: Callable[[], object],
     earnings_snapshot_job: Callable[[], object],
     discovery_job: Callable[[], object] | None = None,
+    earnings_screen_job: Callable[[], object] | None = None,
 ) -> CombinedSnapshotResult:
     """Run collectors and optional discovery sequentially to avoid DuckDB writer conflicts."""
     history = options_history_job()
     earnings = earnings_snapshot_job()
     discovery = discovery_job() if discovery_job is not None else None
-    return CombinedSnapshotResult(history, earnings, discovery)
+    earnings_screen = earnings_screen_job() if earnings_screen_job is not None else None
+    return CombinedSnapshotResult(history, earnings, discovery, earnings_screen)
+
+
+@dataclass(frozen=True, slots=True)
+class EarningsScreenCycleResult:
+    status: str
+    symbols: tuple[str, ...] = ()
+    error: str | None = None
+
+    @property
+    def symbol_count(self) -> int:
+        return len(self.symbols)
+
+
+def reviewed_upcoming_event_symbols(
+    settings,
+    symbols: tuple[str, ...],
+    *,
+    as_of: datetime,
+    days_ahead: int = 45,
+) -> tuple[str, ...]:
+    """Return symbols with reviewed, future events and usable expirations."""
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("as_of must be timezone-aware")
+    if days_ahead < 0:
+        raise ValueError("days_ahead cannot be negative")
+
+    from .csv_inputs import CsvResearchInputs
+
+    today = as_of.astimezone(NEW_YORK).date()
+    events = CsvResearchInputs(settings).get_earnings_events(
+        symbols,
+        start=today,
+        end=today + timedelta(days=days_ahead),
+    )
+    event_times = {
+        "before_open": local_time(8, 15),
+        "after_close": local_time(16, 15),
+    }
+    eligible: set[str] = set()
+    for event in events:
+        event_time = event_times.get((event.timing or "").strip().lower())
+        if event_time is None:
+            continue
+        event_at = datetime.combine(event.event_date, event_time, tzinfo=NEW_YORK)
+        event_observed_at = event.source_timestamp or event.observed_at
+        if event_observed_at > as_of or event_at <= as_of:
+            continue
+        expiration_raw = event.metadata.get("expiration_date")
+        if not expiration_raw:
+            continue
+        try:
+            expiration = date.fromisoformat(str(expiration_raw))
+        except ValueError:
+            continue
+        expiration_at = datetime.combine(expiration, local_time(16, 0), tzinfo=NEW_YORK)
+        if expiration_at < event_at:
+            continue
+        eligible.add(event.symbol.upper())
+    return tuple(symbol for symbol in dict.fromkeys(symbols) if symbol.upper() in eligible)
+
+
+class DailyEarningsScreenJob:
+    """Run the earnings screen at most once per local market day when reviewed events exist."""
+
+    def __init__(
+        self,
+        settings,
+        symbols: tuple[str, ...],
+        scan: Callable[..., int],
+        *,
+        now: Callable[[], datetime] | None = None,
+    ) -> None:
+        self.settings = settings
+        self.symbols = symbols
+        self.scan = scan
+        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.last_successful_day: date | None = None
+
+    def __call__(self) -> EarningsScreenCycleResult:
+        now = self.now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            return EarningsScreenCycleResult(
+                "earnings_scan_failed", error="scheduler time must be timezone-aware"
+            )
+        today = now.astimezone(NEW_YORK).date()
+        if self.last_successful_day == today:
+            return EarningsScreenCycleResult("already_scanned_today")
+        try:
+            event_symbols = reviewed_upcoming_event_symbols(
+                self.settings, self.symbols, as_of=now
+            )
+        except Exception as exc:
+            return EarningsScreenCycleResult(
+                "failed_to_read_reviewed_events",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        if not event_symbols:
+            return EarningsScreenCycleResult("no_reviewed_upcoming_events")
+        try:
+            result = self.scan(use_alpaca=True, symbols=event_symbols)
+        except Exception as exc:
+            return EarningsScreenCycleResult(
+                "earnings_scan_failed",
+                symbols=event_symbols,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        if result != 0:
+            return EarningsScreenCycleResult(
+                "earnings_scan_failed",
+                symbols=event_symbols,
+                error=f"earnings scan returned exit code {result}",
+            )
+        self.last_successful_day = today
+        return EarningsScreenCycleResult("scanned", symbols=event_symbols)
 
 
 class RateLimitError(RuntimeError):
@@ -312,8 +444,10 @@ def main() -> int:
         from .option_snapshots import collect_option_snapshots
 
         discovery_job = None
+        earnings_screen_job = None
         if args.job == "research-cycle":
             from .discover import run_discovery
+            from .scan import run_scan
 
             last_discovery_at: list[datetime | None] = [None]
 
@@ -327,6 +461,7 @@ def main() -> int:
                 return result
 
             discovery_job = run_hourly_discovery
+            earnings_screen_job = DailyEarningsScreenJob(settings, symbols, run_scan)
 
         job = partial(
             collect_serially,
@@ -341,6 +476,7 @@ def main() -> int:
             ),
             partial(collect_earnings_option_snapshots, symbols, settings=settings),
             discovery_job,
+            earnings_screen_job,
         )
     else:
         from .equity_scan import run_equity_scan
@@ -379,6 +515,8 @@ def main() -> int:
                 ("selected_pairs", "selected_pairs"),
                 ("discovery_groups", "discovery_groups"),
                 ("discovery_errors", "discovery_errors"),
+                ("earnings_screen_symbols", "earnings_screen_symbols"),
+                ("earnings_screen_status", "earnings_screen_status"),
             ):
                 if hasattr(value, attribute):
                     field_value = getattr(value, attribute)
@@ -393,6 +531,8 @@ def main() -> int:
                     details.append(f"{label}={len(getattr(value, attribute))}")
         if result.error:
             details.append(f"error={result.error}")
+        if value is not None and getattr(value, "earnings_screen_error", None):
+            details.append(f"earnings_screen_error={value.earnings_screen_error}")
         suffix = f"; {'; '.join(details)}" if details else ""
         print(
             f"{timestamp} scheduled scan {result.status.value} "

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 
 from thetahawk.data_status import inspect_data_coverage
@@ -35,8 +36,16 @@ def test_reports_comparable_contract_history_and_research_input_coverage(tmp_pat
             sessions += 1
         day += timedelta(days=1)
 
+    last_quote = quotes[-1]
+    freshness_fixtures = [
+        replace(last_quote, source_timestamp=last_quote.observed_at - timedelta(seconds=901)),
+        replace(last_quote, source_timestamp=last_quote.observed_at + timedelta(seconds=1)),
+        replace(last_quote, source_timestamp=None),
+        replace(last_quote, source_timestamp=last_quote.observed_at - timedelta(seconds=900)),
+    ]
+
     with ResearchStore(database) as store:
-        store.save_quotes(quotes)
+        store.save_quotes([*quotes, *freshness_fixtures])
         store.save_historical_prices((HistoricalPrice(
             symbol="AAPL",
             session_date=date(2026, 11, 3),
@@ -64,7 +73,12 @@ def test_reports_comparable_contract_history_and_research_input_coverage(tmp_pat
 
     [row] = report.symbols
     assert row.symbol == "AAPL"
-    assert row.option_snapshot_count == 20
+    assert row.option_snapshot_count == 24
+    assert row.fresh_option_snapshot_count == 21
+    assert row.stale_option_snapshot_count == 1
+    assert row.future_option_snapshot_count == 1
+    assert row.missing_source_timestamp_count == 1
+    assert row.unverifiable_observed_timestamp_count == 0
     assert row.earnings_option_snapshot_count == 1
     assert row.option_contract_count == 1
     assert row.option_session_count == 20

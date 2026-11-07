@@ -12,12 +12,18 @@ from zoneinfo import ZoneInfo
 
 
 EASTERN = ZoneInfo("America/New_York")
+UOA_MAXIMUM_QUOTE_AGE_SECONDS = 900
 
 
 @dataclass(frozen=True, slots=True)
 class SymbolDataStatus:
     symbol: str
     option_snapshot_count: int = 0
+    fresh_option_snapshot_count: int = 0
+    stale_option_snapshot_count: int = 0
+    future_option_snapshot_count: int = 0
+    missing_source_timestamp_count: int = 0
+    unverifiable_observed_timestamp_count: int = 0
     earnings_option_snapshot_count: int = 0
     option_contract_count: int = 0
     option_session_count: int = 0
@@ -80,7 +86,23 @@ def inspect_data_coverage(
                 item = grouped.setdefault(symbol, _empty_counts())
                 item["option_snapshot_count"] += 1
                 observed_at = _parse_datetime(payload.get("observed_at"))
-                source_time = _parse_datetime(payload.get("source_timestamp")) or observed_at
+                raw_source_time = payload.get("source_timestamp")
+                source_time = _parse_datetime(raw_source_time)
+                if raw_source_time is None or source_time is None:
+                    item["missing_source_timestamp_count"] += 1
+                elif observed_at is None:
+                    item["unverifiable_observed_timestamp_count"] += 1
+                else:
+                    quote_age_seconds = (observed_at - source_time).total_seconds()
+                    if quote_age_seconds < 0:
+                        item["future_option_snapshot_count"] += 1
+                    elif quote_age_seconds > UOA_MAXIMUM_QUOTE_AGE_SECONDS:
+                        item["stale_option_snapshot_count"] += 1
+                    else:
+                        item["fresh_option_snapshot_count"] += 1
+                # Keep scanner-compatible behavior for legacy rows with no
+                # provider timestamp, while counting them as unverifiable above.
+                source_time_for_comparison = source_time or observed_at
                 metadata = payload.get("metadata") or {}
                 contract = metadata.get("contract_symbol") if isinstance(metadata, dict) else None
                 if (
@@ -113,8 +135,9 @@ def inspect_data_coverage(
                         and source not in {"", "unknown"}
                         and volume is not None
                         and volume >= 0
-                        and source_time is not None
-                        and 0 <= (observed_at - source_time).total_seconds() <= 900
+                        and source_time_for_comparison is not None
+                        and 0 <= (observed_at - source_time_for_comparison).total_seconds()
+                        <= UOA_MAXIMUM_QUOTE_AGE_SECONDS
                     ):
                         bucket_minute = (observed_at.astimezone(EASTERN).minute // 15) * 15
                         bucket = observed_at.astimezone(EASTERN).hour * 60 + bucket_minute
@@ -160,6 +183,13 @@ def inspect_data_coverage(
             report_symbols.append(SymbolDataStatus(
                 symbol=symbol,
                 option_snapshot_count=counts["option_snapshot_count"],
+                fresh_option_snapshot_count=counts["fresh_option_snapshot_count"],
+                stale_option_snapshot_count=counts["stale_option_snapshot_count"],
+                future_option_snapshot_count=counts["future_option_snapshot_count"],
+                missing_source_timestamp_count=counts["missing_source_timestamp_count"],
+                unverifiable_observed_timestamp_count=(
+                    counts["unverifiable_observed_timestamp_count"]
+                ),
                 earnings_option_snapshot_count=counts["earnings_option_snapshot_count"],
                 option_contract_count=len(counts["contracts"]),
                 option_session_count=len(counts["option_sessions"]),
@@ -188,6 +218,11 @@ def inspect_data_coverage(
 def _empty_counts() -> dict[str, Any]:
     return {
         "option_snapshot_count": 0,
+        "fresh_option_snapshot_count": 0,
+        "stale_option_snapshot_count": 0,
+        "future_option_snapshot_count": 0,
+        "missing_source_timestamp_count": 0,
+        "unverifiable_observed_timestamp_count": 0,
         "earnings_option_snapshot_count": 0,
         "contracts": set(),
         "option_sessions": set(),
@@ -260,6 +295,11 @@ def main() -> int:
             f"{row.symbol}: {row.option_snapshot_count} option snapshots "
             f"({row.earnings_option_snapshot_count} earnings-linked), "
             f"{row.option_contract_count} contracts, {row.option_session_count} option sessions; "
+            f"freshness within {UOA_MAXIMUM_QUOTE_AGE_SECONDS}s: "
+            f"{row.fresh_option_snapshot_count} fresh, {row.stale_option_snapshot_count} stale, "
+            f"{row.future_option_snapshot_count} future, "
+            f"{row.missing_source_timestamp_count} missing source time, "
+            f"{row.unverifiable_observed_timestamp_count} missing observed time; "
             f"latest session {row.last_option_session_date or 'none'}; "
             f"pinned expiry {row.planned_option_expiration_date or 'none'}; "
             f"latest snapshot {row.last_option_snapshot_at.isoformat() if row.last_option_snapshot_at else 'none'}; "
