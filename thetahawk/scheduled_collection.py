@@ -41,6 +41,7 @@ class RunResult:
 class CombinedSnapshotResult:
     options_history: object
     earnings_events: object
+    discovery: object | None = None
 
     @property
     def saved_quotes(self) -> int:
@@ -84,15 +85,32 @@ class CombinedSnapshotResult:
     def skipped_events(self) -> tuple[str, ...]:
         return tuple(getattr(self.earnings_events, "skipped_events", ()))
 
+    @property
+    def selected_pairs(self) -> int | None:
+        pairs = getattr(self.discovery, "selected_pairs", None)
+        return len(pairs) if pairs is not None else None
+
+    @property
+    def discovery_groups(self) -> int | None:
+        discoveries = getattr(self.discovery, "discoveries", None)
+        return len(discoveries) if discoveries is not None else None
+
+    @property
+    def discovery_errors(self) -> int | None:
+        errors = getattr(self.discovery, "errors", None)
+        return len(errors) if errors is not None else None
+
 
 def collect_serially(
     options_history_job: Callable[[], object],
     earnings_snapshot_job: Callable[[], object],
+    discovery_job: Callable[[], object] | None = None,
 ) -> CombinedSnapshotResult:
-    """Run both option collectors sequentially to avoid concurrent DuckDB writers."""
+    """Run collectors and optional discovery sequentially to avoid DuckDB writer conflicts."""
     history = options_history_job()
     earnings = earnings_snapshot_job()
-    return CombinedSnapshotResult(history, earnings)
+    discovery = discovery_job() if discovery_job is not None else None
+    return CombinedSnapshotResult(history, earnings, discovery)
 
 
 class RateLimitError(RuntimeError):
@@ -238,7 +256,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--job",
-        choices=("earnings", "equity", "options", "earnings-options", "options-and-earnings"),
+        choices=(
+            "earnings", "equity", "options", "earnings-options",
+            "options-and-earnings", "research-cycle",
+        ),
         default="equity",
     )
     parser.add_argument("--symbols", help="Comma-separated symbols; defaults to THETAHAWK_SYMBOLS")
@@ -286,9 +307,26 @@ def main() -> int:
         from .earnings_option_snapshots import collect_earnings_option_snapshots
 
         job = partial(collect_earnings_option_snapshots, symbols, settings=settings)
-    elif args.job == "options-and-earnings":
+    elif args.job in {"options-and-earnings", "research-cycle"}:
         from .earnings_option_snapshots import collect_earnings_option_snapshots
         from .option_snapshots import collect_option_snapshots
+
+        discovery_job = None
+        if args.job == "research-cycle":
+            from .discover import run_discovery
+
+            last_discovery_at: list[datetime | None] = [None]
+
+            def run_hourly_discovery():
+                now = datetime.now(timezone.utc)
+                previous = last_discovery_at[0]
+                if previous is not None and (now - previous).total_seconds() < 3600:
+                    return None
+                result = run_discovery(symbols=symbols, settings=settings)
+                last_discovery_at[0] = now
+                return result
+
+            discovery_job = run_hourly_discovery
 
         job = partial(
             collect_serially,
@@ -302,6 +340,7 @@ def main() -> int:
                 preserve_expiration=True,
             ),
             partial(collect_earnings_option_snapshots, symbols, settings=settings),
+            discovery_job,
         )
     else:
         from .equity_scan import run_equity_scan
@@ -314,7 +353,11 @@ def main() -> int:
         interval_seconds=(
             args.interval_seconds
             if args.interval_seconds is not None
-            else (900 if args.job in {"options", "earnings-options", "options-and-earnings"} else 300)
+            else (
+                900 if args.job in {
+                    "options", "earnings-options", "options-and-earnings", "research-cycle"
+                } else 300
+            )
         ),
         max_retries=args.max_retries,
         backoff_base_seconds=args.backoff_base_seconds,
@@ -333,9 +376,14 @@ def main() -> int:
                 ("symbols_with_expiration", "symbols_with_expiration"),
                 ("eligible_events", "eligible_events"),
                 ("requested_chains", "requested_chains"),
+                ("selected_pairs", "selected_pairs"),
+                ("discovery_groups", "discovery_groups"),
+                ("discovery_errors", "discovery_errors"),
             ):
                 if hasattr(value, attribute):
-                    details.append(f"{label}={getattr(value, attribute)}")
+                    field_value = getattr(value, attribute)
+                    if field_value is not None:
+                        details.append(f"{label}={field_value}")
             for attribute, label in (
                 ("failed_chains", "failed_chains"),
                 ("skipped_events", "skipped_events"),

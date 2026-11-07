@@ -10,7 +10,7 @@ class MacCollectorInstallerTests(unittest.TestCase):
         job, label = next(iter(JOBS.items()))
         payload = _agent_payload(job, label)
 
-        self.assertEqual(job, "options-and-earnings")
+        self.assertEqual(job, "research-cycle")
         self.assertEqual(payload["Label"], "com.thetahawk.options-collector")
         self.assertEqual(payload["ProgramArguments"][5], job)
         self.assertIn("--options-history-min-dte", payload["ProgramArguments"])

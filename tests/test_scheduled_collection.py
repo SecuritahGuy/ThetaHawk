@@ -41,13 +41,19 @@ class ScheduledCollectionTests(unittest.TestCase):
             failed_chains = ()
             skipped_events = ("unreviewed",)
 
+        class DiscoveryResult:
+            selected_pairs = ("call-put-pair",)
+            discoveries = ("ranked-group", "second-group")
+            errors = ()
+
         result = collect_serially(
             lambda: calls.append("history") or HistoryResult(),
             lambda: calls.append("earnings") or EarningsResult(),
+            lambda: calls.append("discovery") or DiscoveryResult(),
         )
 
         self.assertIsInstance(result, CombinedSnapshotResult)
-        self.assertEqual(calls, ["history", "earnings"])
+        self.assertEqual(calls, ["history", "earnings", "discovery"])
         self.assertEqual(result.saved_quotes, 13)
         self.assertEqual(result.fetched_quotes, 14)
         self.assertEqual(result.saved_events, 1)
@@ -57,6 +63,9 @@ class ScheduledCollectionTests(unittest.TestCase):
         self.assertEqual(result.requested_chains, 1)
         self.assertEqual(result.failed_chains, ())
         self.assertEqual(result.skipped_events, ("unreviewed",))
+        self.assertEqual(result.selected_pairs, 1)
+        self.assertEqual(result.discovery_groups, 2)
+        self.assertEqual(result.discovery_errors, 0)
 
     def test_market_calendar_rate_limit_uses_bounded_retry(self) -> None:
         calendar_calls = []

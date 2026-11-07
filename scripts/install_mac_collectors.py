@@ -11,13 +11,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-JOBS = {"options-and-earnings": "com.thetahawk.options-collector"}
+JOBS = {"research-cycle": "com.thetahawk.options-collector"}
 LEGACY_LABELS = ("com.thetahawk.earnings-options-collector",)
 
 
 def _agent_payload(job: str, label: str) -> dict[str, object]:
     data_dir = ROOT / "data"
-    log_name = "options" if job == "options-and-earnings" else job
+    log_name = "options" if job == "research-cycle" else job
     return {
         "Label": label,
         "ProgramArguments": [
@@ -30,7 +30,7 @@ def _agent_payload(job: str, label: str) -> dict[str, object]:
             "--interval-seconds",
             "900",
             *(["--options-history-min-dte", "14", "--options-history-max-dte", "75"]
-              if job in {"options", "options-and-earnings"} else []),
+              if job in {"options", "options-and-earnings", "research-cycle"} else []),
         ],
         "WorkingDirectory": str(ROOT),
         "RunAtLoad": True,
