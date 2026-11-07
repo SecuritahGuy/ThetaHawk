@@ -29,6 +29,10 @@ class QuoteStore(Protocol):
     def save_quotes(self, quotes: Sequence[Quote]) -> int: ...
 
 
+class EarningsInputStore(QuoteStore, Protocol):
+    def save_earnings_events(self, events: Sequence[EarningsEvent]) -> int: ...
+
+
 @dataclass(frozen=True, slots=True)
 class EarningsSnapshotResult:
     requested_symbols: tuple[str, ...]
@@ -37,6 +41,7 @@ class EarningsSnapshotResult:
     requested_chains: int
     failed_chains: tuple[str, ...]
     skipped_events: tuple[str, ...]
+    saved_events: int
     fetched_quotes: int
     saved_quotes: int
     as_of: datetime
@@ -47,7 +52,7 @@ def collect_earnings_option_snapshots(
     *,
     settings: Settings | None = None,
     provider: EarningsSnapshotProvider | None = None,
-    store: QuoteStore | None = None,
+    store: EarningsInputStore | None = None,
     as_of: datetime | None = None,
     days_ahead: int = 45,
 ) -> EarningsSnapshotResult:
@@ -113,6 +118,7 @@ def collect_earnings_option_snapshots(
     failed: list[str] = []
     eligible_events = sum(len(rows) for rows in grouped.values())
     try:
+        saved_events = store.save_earnings_events(events)
         for (symbol, expiration), matching_events in grouped.items():
             try:
                 fetched = provider.get_option_quotes(symbol, expiration)
@@ -152,6 +158,7 @@ def collect_earnings_option_snapshots(
         requested_chains=len(grouped),
         failed_chains=tuple(failed),
         skipped_events=tuple(skipped),
+        saved_events=saved_events,
         fetched_quotes=len(all_quotes),
         saved_quotes=saved,
         as_of=scan_time,
@@ -180,7 +187,8 @@ def main() -> int:
     result = collect_earnings_option_snapshots(symbols, days_ahead=args.days_ahead)
     print(
         f"Reviewed {result.reviewed_events} upcoming event rows; selected "
-        f"{result.eligible_events} events across {result.requested_chains} distinct chains; "
+        f"persisted {result.saved_events} input events and selected {result.eligible_events} "
+        f"across {result.requested_chains} distinct chains; "
         f"saved {result.saved_quotes}/{result.fetched_quotes} quotes."
     )
     if result.skipped_events:

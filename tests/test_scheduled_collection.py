@@ -35,6 +35,7 @@ class ScheduledCollectionTests(unittest.TestCase):
         class EarningsResult:
             fetched_quotes = 4
             saved_quotes = 4
+            saved_events = 1
             eligible_events = 1
             requested_chains = 1
             failed_chains = ()
@@ -49,6 +50,7 @@ class ScheduledCollectionTests(unittest.TestCase):
         self.assertEqual(calls, ["history", "earnings"])
         self.assertEqual(result.saved_quotes, 13)
         self.assertEqual(result.fetched_quotes, 14)
+        self.assertEqual(result.saved_events, 1)
         self.assertEqual(result.symbols_with_expiration, 2)
         self.assertEqual(result.symbols_without_eligible_expiration, ("NOOPT",))
         self.assertEqual(result.eligible_events, 1)

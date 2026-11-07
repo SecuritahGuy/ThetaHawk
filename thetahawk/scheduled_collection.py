@@ -57,6 +57,10 @@ class CombinedSnapshotResult:
         )
 
     @property
+    def saved_events(self) -> int:
+        return int(getattr(self.earnings_events, "saved_events", 0))
+
+    @property
     def symbols_with_expiration(self) -> int:
         return int(getattr(self.options_history, "symbols_with_expiration", 0))
 
@@ -325,6 +329,7 @@ def main() -> int:
             for attribute, label in (
                 ("saved_quotes", "saved_quotes"),
                 ("fetched_quotes", "fetched_quotes"),
+                ("saved_events", "saved_events"),
                 ("symbols_with_expiration", "symbols_with_expiration"),
                 ("eligible_events", "eligible_events"),
                 ("requested_chains", "requested_chains"),

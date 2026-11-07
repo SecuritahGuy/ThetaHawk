@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from thetahawk.domain import OptionRight, Quote
+from thetahawk.data_status import inspect_data_coverage
 from thetahawk.earnings_option_snapshots import collect_earnings_option_snapshots
 from thetahawk.settings import Settings
 
@@ -25,10 +26,15 @@ class FakeProvider:
 class FakeStore:
     def __init__(self):
         self.quotes = []
+        self.events = []
 
     def save_quotes(self, quotes):
         self.quotes.extend(quotes)
         return len(quotes)
+
+    def save_earnings_events(self, events):
+        self.events.extend(events)
+        return len(events)
 
 
 def option_quote(symbol, expiration, right):
@@ -49,6 +55,34 @@ def option_quote(symbol, expiration, right):
 
 
 class EarningsOptionSnapshotTests(unittest.TestCase):
+    def test_persists_reviewed_event_inputs_for_later_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            event_path = root / "earnings.csv"
+            event_path.write_text(
+                "symbol,event_date,timing,expiration_date,observed_at,source\n"
+                "AAPL,2026-11-17,after_close,2026-12-18,"
+                "2026-11-01T12:00:00Z,reviewed-calendar\n",
+                encoding="utf-8",
+            )
+            settings = Settings(
+                database_path=root / "research.duckdb",
+                earnings_csv_path=event_path,
+                symbols=("AAPL",),
+            )
+
+            result = collect_earnings_option_snapshots(
+                settings=settings,
+                provider=FakeProvider({}),
+                as_of=datetime(2026, 11, 5, 15, 0, tzinfo=timezone.utc),
+            )
+
+            [row] = inspect_data_coverage(settings.database_path).symbols
+
+        self.assertEqual(result.saved_events, 1)
+        self.assertEqual(row.earnings_event_rows, 1)
+        self.assertEqual(row.earnings_events_with_reviewed_timing, 1)
+
     def test_requires_reviewed_upcoming_event_and_tags_deduplicated_chains(self):
         as_of = datetime(2026, 11, 5, 15, 0, tzinfo=timezone.utc)  # 10:00 ET
         aapl_expiry = date(2026, 12, 4)
@@ -86,6 +120,9 @@ class EarningsOptionSnapshotTests(unittest.TestCase):
             )
 
         self.assertEqual(result.reviewed_events, 5)
+        self.assertEqual(result.saved_events, 5)
+        self.assertEqual(len(store.events), 5)
+        self.assertEqual(store.events[0].source, "reviewed-calendar")
         self.assertEqual(result.eligible_events, 3)
         self.assertEqual(result.requested_chains, 2)
         self.assertEqual(provider.calls, [("AAPL", aapl_expiry), ("MSFT", msft_expiry)])

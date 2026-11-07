@@ -194,8 +194,27 @@ def walk_forward_overextended(
             str(horizon): {
                 "episode_returns": _return_summary(episodes, horizon),
                 "all_eligible_days_reference": _return_summary(all_eligible, horizon),
+                "per_symbol_episode_contribution": _per_symbol_contribution(
+                    episodes,
+                    horizon,
+                    [row["symbol"] for row in per_symbol],
+                ),
+                "leave_one_symbol_out": _leave_one_symbol_out(
+                    episodes,
+                    horizon,
+                    [row["symbol"] for row in per_symbol],
+                ),
             }
             for horizon in horizons
+        },
+        "robust_summary_definitions": {
+            "winsorized_mean_tail_fraction": 0.05,
+            "trimmed_mean_tail_fraction": 0.10,
+            "median_absolute_deviation": "median absolute distance from the median return",
+            "sensitivity_note": (
+                "Per-symbol mean contributions add to the pooled episode mean; "
+                "they are descriptive diagnostics, not portfolio P&L."
+            ),
         },
         "symbols": per_symbol,
         "limitations": [
@@ -217,15 +236,69 @@ def _return_summary(rows: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
         return {"sample_size": 0, "mean_return_fraction": None,
                 "median_return_fraction": None, "mean_absolute_return_fraction": None,
                 "mean_direction_aligned_fraction": None,
-                "direction_aligned_positive_fraction": None}
+                "direction_aligned_positive_fraction": None,
+                "median_absolute_deviation_fraction": None,
+                "winsorized_mean_5pct_fraction": None,
+                "trimmed_mean_10pct_fraction": None}
+    center = median(returns)
     return {
         "sample_size": len(returns),
         "mean_return_fraction": mean(returns),
-        "median_return_fraction": median(returns),
+        "median_return_fraction": center,
         "mean_absolute_return_fraction": mean(abs(value) for value in returns),
         "mean_direction_aligned_fraction": mean(aligned),
         "direction_aligned_positive_fraction": sum(value > 0 for value in aligned) / len(aligned),
+        "median_absolute_deviation_fraction": median(abs(value - center) for value in returns),
+        "winsorized_mean_5pct_fraction": _winsorized_mean(returns, tail_fraction=0.05),
+        "trimmed_mean_10pct_fraction": _trimmed_mean(returns, tail_fraction=0.10),
     }
+
+
+def _winsorized_mean(values: list[float], *, tail_fraction: float) -> float:
+    ordered = sorted(values)
+    tail_count = int(len(ordered) * tail_fraction)
+    lower = ordered[tail_count]
+    upper = ordered[len(ordered) - tail_count - 1]
+    return mean(min(max(value, lower), upper) for value in ordered)
+
+
+def _trimmed_mean(values: list[float], *, tail_fraction: float) -> float:
+    ordered = sorted(values)
+    tail_count = int(len(ordered) * tail_fraction)
+    retained = ordered[tail_count:len(ordered) - tail_count] if tail_count else ordered
+    return mean(retained) if retained else median(ordered)
+
+
+def _per_symbol_contribution(
+    rows: list[dict[str, Any]], horizon: int, symbols: list[str]
+) -> list[dict[str, Any]]:
+    key = str(horizon)
+    pooled_count = len(rows)
+    output = []
+    for symbol in symbols:
+        symbol_rows = [row for row in rows if row["symbol"] == symbol]
+        returns = [row["forward_returns"][key] for row in symbol_rows]
+        output.append({
+            "symbol": symbol,
+            **_return_summary(symbol_rows, horizon),
+            "contribution_to_pooled_mean_fraction": (
+                sum(returns) / pooled_count if pooled_count else None
+            ),
+        })
+    return output
+
+
+def _leave_one_symbol_out(
+    rows: list[dict[str, Any]], horizon: int, symbols: list[str]
+) -> list[dict[str, Any]]:
+    output = []
+    for excluded_symbol in symbols:
+        remaining = [row for row in rows if row["symbol"] != excluded_symbol]
+        output.append({
+            "excluded_symbol": excluded_symbol,
+            **_return_summary(remaining, horizon),
+        })
+    return output
 
 
 def load_database_prices(database_path: str | Path, *, symbol: str | None = None) -> list[HistoricalPrice]:
