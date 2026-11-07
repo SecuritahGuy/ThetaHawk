@@ -63,6 +63,8 @@ def test_reports_comparable_contract_history_and_research_input_coverage(tmp_pat
     assert row.earnings_option_snapshot_count == 1
     assert row.option_contract_count == 1
     assert row.option_session_count == 20
+    assert row.last_option_session_date == date(2026, 10, 28)
+    assert row.last_option_snapshot_at == max(quote.observed_at for quote in quotes)
     assert row.max_comparable_sessions == 20
     assert row.unusual_activity_baseline_possible is True
     assert row.historical_price_rows == 1

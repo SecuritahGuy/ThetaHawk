@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,6 +21,8 @@ class SymbolDataStatus:
     earnings_option_snapshot_count: int = 0
     option_contract_count: int = 0
     option_session_count: int = 0
+    last_option_session_date: date | None = None
+    last_option_snapshot_at: datetime | None = None
     max_comparable_sessions: int = 0
     unusual_activity_baseline_possible: bool = False
     historical_price_rows: int = 0
@@ -96,6 +98,16 @@ def inspect_data_coverage(
                     session = observed_at.astimezone(EASTERN).date()
                     item["option_sessions"].add(session)
                     if (
+                        item["last_option_session_date"] is None
+                        or session > item["last_option_session_date"]
+                    ):
+                        item["last_option_session_date"] = session
+                    if (
+                        item["last_option_snapshot_at"] is None
+                        or observed_at > item["last_option_snapshot_at"]
+                    ):
+                        item["last_option_snapshot_at"] = observed_at
+                    if (
                         contract
                         and source not in {"", "unknown"}
                         and volume is not None
@@ -142,6 +154,8 @@ def inspect_data_coverage(
                 earnings_option_snapshot_count=counts["earnings_option_snapshot_count"],
                 option_contract_count=len(counts["contracts"]),
                 option_session_count=len(counts["option_sessions"]),
+                last_option_session_date=counts["last_option_session_date"],
+                last_option_snapshot_at=counts["last_option_snapshot_at"],
                 max_comparable_sessions=comparable,
                 unusual_activity_baseline_possible=(comparable >= minimum_baseline_sessions),
                 historical_price_rows=counts["historical_price_rows"],
@@ -167,6 +181,8 @@ def _empty_counts() -> dict[str, Any]:
         "earnings_option_snapshot_count": 0,
         "contracts": set(),
         "option_sessions": set(),
+        "last_option_session_date": None,
+        "last_option_snapshot_at": None,
         "comparable_sessions": {},
         "historical_price_rows": 0,
         "earnings_event_rows": 0,
@@ -217,6 +233,7 @@ def main() -> int:
         args.database,
         minimum_baseline_sessions=args.minimum_baseline_sessions,
     )
+    print("Execution mode: research-only; order submission is not implemented.")
     if not report.database_exists:
         print(f"No research database found at {report.database_path}.")
         return 0
@@ -232,6 +249,8 @@ def main() -> int:
             f"{row.symbol}: {row.option_snapshot_count} option snapshots "
             f"({row.earnings_option_snapshot_count} earnings-linked), "
             f"{row.option_contract_count} contracts, {row.option_session_count} option sessions; "
+            f"latest session {row.last_option_session_date or 'none'}; "
+            f"latest snapshot {row.last_option_snapshot_at.isoformat() if row.last_option_snapshot_at else 'none'}; "
             f"max same-contract/feed/time-bucket history {row.max_comparable_sessions} "
             f"({possible}); {row.historical_price_rows} equity-history rows; "
             f"{row.earnings_events_with_reviewed_timing}/{row.earnings_event_rows} earnings events "
